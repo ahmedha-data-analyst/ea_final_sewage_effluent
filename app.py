@@ -59,6 +59,7 @@ st.set_option("client.toolbarMode", "viewer")
 PARQUET_FILE = "EA_final_sewage_effluent_2000_2025_cleaned.parquet"
 SUMMARY_FILE = "EA_final_sewage_det_summary_full.csv"
 LOGO_FILE = "logo.png"
+DETAIL_ROW_LIMIT = 300_000
 
 
 # ======================================================
@@ -495,7 +496,12 @@ def parquet_columns() -> list:
 
 
 @st.cache_data(show_spinner=True, max_entries=12)
-def load_test_data(test_name: str, unit: str | None = None) -> pd.DataFrame:
+def load_test_data(
+    test_name: str,
+    unit: str | None = None,
+    start_date=None,
+    end_date=None,
+) -> pd.DataFrame:
     """Load only the rows for a single test from the parquet.
 
     Uses Arrow predicate pushdown (filters) plus column selection so we read a
@@ -510,6 +516,10 @@ def load_test_data(test_name: str, unit: str | None = None) -> pd.DataFrame:
     filters = [("Test", "==", test_name)]
     if unit is not None:
         filters.append(("Unit", "==", unit))
+    if start_date is not None:
+        filters.append(("Date", ">=", pd.Timestamp(start_date)))
+    if end_date is not None:
+        filters.append(("Date", "<", pd.Timestamp(end_date) + pd.Timedelta(days=1)))
 
     try:
         df = pd.read_parquet(PARQUET_FILE, columns=cols, filters=filters)
@@ -519,6 +529,12 @@ def load_test_data(test_name: str, unit: str | None = None) -> pd.DataFrame:
         df = df[df["Test"] == test_name]
         if unit is not None:
             df = df[df["Unit"] == unit]
+        if start_date is not None or end_date is not None:
+            df = filter_by_date_range(
+                df,
+                start_date if start_date is not None else df["Date"].min(),
+                end_date if end_date is not None else df["Date"].max(),
+            )
 
     if "Date" in df.columns:
         df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
@@ -616,6 +632,21 @@ def info_card(text: str):
 
 def human_int(n) -> str:
     return f"{int(n):,}"
+
+
+def estimate_window_rows(summary_row: pd.Series, start_date, end_date) -> int:
+    """Estimate rows for a selected date window without scanning the parquet."""
+    first = pd.Timestamp(summary_row["first_sample"])
+    last = pd.Timestamp(summary_row["last_sample"])
+    if pd.isna(first) or pd.isna(last):
+        return int(summary_row["n_obs"])
+    start = max(pd.Timestamp(start_date), first)
+    end = min(pd.Timestamp(end_date), last)
+    if start > end:
+        return 0
+    total_days = max((last - first).days + 1, 1)
+    selected_days = max((end - start).days + 1, 1)
+    return int(math.ceil(float(summary_row["n_obs"]) * selected_days / total_days))
 
 
 def smart_round(values: pd.Series) -> int:
@@ -1461,25 +1492,6 @@ def page_overview():
     )
     st.dataframe(schema_df, use_container_width=True, hide_index=True)
 
-    with st.expander("Show a sample of real rows (earliest and latest readings)", expanded=False):
-        st.caption(
-            "Loading a small, representative slice — the two single busiest tests, "
-            "earliest rows then latest rows."
-        )
-        primary = get_primary_unit_summary()
-        sample_tests = primary["Test"].head(2).tolist()
-        frames = []
-        for t in sample_tests:
-            frames.append(filter_by_date_range(load_test_data(t), date_range_start, date_range_end).sort_values("Date"))
-        sample = pd.concat(frames, ignore_index=True).sort_values("Date")
-        show_cols = [c for c in ["Sampling Point", "Date", "Test", "result", "Unit",
-                                 "Season", "SourceYear", "Category", "Latitude", "Longitude"]
-                     if c in sample.columns]
-        st.markdown("**First 8 readings**")
-        st.dataframe(sample[show_cols].head(8), use_container_width=True, hide_index=True)
-        st.markdown("**Last 8 readings**")
-        st.dataframe(sample[show_cols].tail(8), use_container_width=True, hide_index=True)
-
     st.markdown("---")
 
     # --- "describe" that makes sense: per-test summary table ---
@@ -1542,43 +1554,6 @@ def page_overview():
         apply_dark_layout(fig, "Top 15 tests by number of sites", height=520, legend=False)
         render_plotly(fig)
 
-    st.markdown("---")
-
-    # --- National footprint map, selectable by test ---
-    st.markdown("## Where is sampling happening?")
-    info_card(
-        "Choose any test and see where it is reported across the dataset. Each dot is one "
-        "site; bigger dots have been sampled more often."
-    )
-    map_test = st.selectbox(
-        "Select a test for the map",
-        options=primary["Test"].tolist(),
-        index=0,
-        help="Tests are listed busiest-first. The default is the test with the widest coverage.",
-        key="overview_map_test",
-    )
-    if st.button("Build map", type="primary", key="overview_build_map"):
-        st.session_state["overview_map_test_to_render"] = map_test
-
-    if st.session_state.get("overview_map_test_to_render") != map_test:
-        st.info("Select a test, then build the map when you need the detailed site view.")
-    else:
-        with st.spinner("Building the national map…"):
-            map_df = filter_by_date_range(load_test_data(map_test), date_range_start, date_range_end)
-            sites = site_aggregates_from_frame(map_df)
-            st.caption(
-                f"Showing {human_int(len(sites))} sampling points that report "
-                f"\u201c{map_test}\u201d between {date_range_start:%Y-%m-%d} and "
-                f"{date_range_end:%Y-%m-%d}. Dot size = number of readings at that site."
-            )
-            build_sites_map(
-                sites,
-                title="",
-                colour_metric=None,
-                unit="",
-                height=620,
-            )
-
 
 # ======================================================
 # PAGE 2 — EXPLORE A TEST
@@ -1613,10 +1588,43 @@ def render_test_explorer(test_name: str, scope_label: str):
     if notes:
         st.caption("Data note: " + "; ".join(notes) + ".")
 
+    summary_metric_values = [
+        ("Readings", human_int(srow["n_obs"])),
+        ("Sampling points", human_int(srow["n_sites"])),
+        ("Years covered", human_int(srow["n_years"])),
+        ("Unit", unit),
+        ("Median", f"{srow['median']:,.3f}"),
+        ("P10–P90", f"{srow['p10']:,.3f} – {srow['p90']:,.3f}"),
+        ("Min / Max", f"{srow['min']:,.3f} / {srow['max']:,.3f}"),
+        ("Period", f"{srow['first_sample'].year}–{srow['last_sample'].year}"),
+    ]
+    load_signature = f"{test_name}::{unit}"
+    loaded_key = f"{scope_label}_loaded_test_signature"
+    if st.button("Load analysis", type="primary", key=f"load_analysis_{scope_label}"):
+        st.session_state[loaded_key] = load_signature
+
+    if st.session_state.get(loaded_key) != load_signature:
+        metric_grid(summary_metric_values)
+        st.info("Load the selected test to build the detailed map and charts.")
+        return
+
+    estimated_rows = estimate_window_rows(srow, date_range_start, date_range_end)
+    if estimated_rows > DETAIL_ROW_LIMIT:
+        metric_grid(summary_metric_values)
+        st.warning(
+            f"The selected date window is about {human_int(estimated_rows)} readings. "
+            f"Narrow the date range below about {human_int(DETAIL_ROW_LIMIT)} readings before loading the detailed charts."
+        )
+        return
+
     # --- Load the actual rows for this test (cached, thin slice) ---
     with st.spinner(f"Loading readings for {test_name}…"):
-        df_all_dates = load_test_data(test_name, unit if len(units) > 1 else None)
-        df = filter_by_date_range(df_all_dates, date_range_start, date_range_end)
+        df = load_test_data(
+            test_name,
+            unit if len(units) > 1 else None,
+            date_range_start,
+            date_range_end,
+        )
         sites = site_aggregates_from_frame(df)
 
     dec = 3
