@@ -1557,21 +1557,27 @@ def page_overview():
         help="Tests are listed busiest-first. The default is the test with the widest coverage.",
         key="overview_map_test",
     )
-    with st.spinner("Building the national map…"):
-        map_df = filter_by_date_range(load_test_data(map_test), date_range_start, date_range_end)
-        sites = site_aggregates_from_frame(map_df)
-        st.caption(
-            f"Showing {human_int(len(sites))} sampling points that report "
-            f"\u201c{map_test}\u201d between {date_range_start:%Y-%m-%d} and "
-            f"{date_range_end:%Y-%m-%d}. Dot size = number of readings at that site."
-        )
-        build_sites_map(
-            sites,
-            title="",
-            colour_metric=None,
-            unit="",
-            height=620,
-        )
+    if st.button("Build map", type="primary", key="overview_build_map"):
+        st.session_state["overview_map_test_to_render"] = map_test
+
+    if st.session_state.get("overview_map_test_to_render") != map_test:
+        st.info("Select a test, then build the map when you need the detailed site view.")
+    else:
+        with st.spinner("Building the national map…"):
+            map_df = filter_by_date_range(load_test_data(map_test), date_range_start, date_range_end)
+            sites = site_aggregates_from_frame(map_df)
+            st.caption(
+                f"Showing {human_int(len(sites))} sampling points that report "
+                f"\u201c{map_test}\u201d between {date_range_start:%Y-%m-%d} and "
+                f"{date_range_end:%Y-%m-%d}. Dot size = number of readings at that site."
+            )
+            build_sites_map(
+                sites,
+                title="",
+                colour_metric=None,
+                unit="",
+                height=620,
+            )
 
 
 # ======================================================
