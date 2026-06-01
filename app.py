@@ -2159,7 +2159,7 @@ def render_test_explorer(test_name: str, scope_label: str):
     if notes:
         st.caption("Data note: " + "; ".join(notes) + ".")
 
-    # --- All-time summary metrics (always shown, from precomputed summary) ---
+    # All-time summary metrics — always shown, from precomputed summary, no parquet needed.
     summary_metric_values = [
         ("Readings (all-time)", human_int(srow["n_obs"])),
         ("Sampling points", human_int(srow["n_sites"])),
@@ -2174,17 +2174,7 @@ def render_test_explorer(test_name: str, scope_label: str):
 
     st.markdown("---")
 
-    # --- Correlations are precomputed — show them before loading any row data ---
-    st.markdown("### Which tests move with this one?")
-    st.caption(
-        "Correlations are precomputed from site-year median values using Spearman correlation. "
-        "They show broad co-movement across the monitoring network, not direct causation."
-    )
-    render_test_correlation_section(test_name, scope_label)
-
-    st.markdown("---")
-
-    # --- Safety check: if the window is still too large, warn before loading ---
+    # Safety check: warn if the selected window would load too many rows.
     estimated_rows = estimate_window_rows(srow, date_range_start, date_range_end)
     if estimated_rows > DETAIL_ROW_LIMIT:
         st.warning(
@@ -2194,7 +2184,7 @@ def render_test_explorer(test_name: str, scope_label: str):
         )
         return
 
-    # --- Load the actual rows for this test (cached, thin slice) ---
+    # Load the actual rows for this test (cached, thin slice).
     with st.spinner(f"Loading readings for {test_name}…"):
         df = load_test_data(
             test_name,
@@ -2214,7 +2204,24 @@ def render_test_explorer(test_name: str, scope_label: str):
         f"({human_int(len(df))} readings loaded)."
     )
 
-    # ── 1. Where is it measured? ───────────────────────────────────────────────────────
+    # ── 1. Readings per year ──────────────────────────────────────────────────────────────────────────────────────
+    st.markdown("### Readings per year")
+    st.caption("How much monitoring happened for this test in each year of the selected window.")
+    yearly_count_chart(df, f"{test_name} — readings per year")
+
+    st.markdown("---")
+
+    # ── 2. Trend over time ──────────────────────────────────────────────────────────────────────────────────────────
+    st.markdown("### Trend over time")
+    st.caption(
+        "Monthly median value (line) with the interquartile range shaded behind it. "
+        "Aggregating to monthly medians smooths noise while preserving seasonal and long-term patterns."
+    )
+    monthly_trend_chart(df, f"{test_name} — monthly median over time", unit, remove_outliers=remove_outliers)
+
+    st.markdown("---")
+
+    # ── 3. Where is it measured? ──────────────────────────────────────────────────────────────────────────────────────────
     st.markdown(f"### Where is {test_name} measured?")
     st.caption(
         "Each dot is a sampling point. Dot size = how often it’s sampled; "
@@ -2235,24 +2242,7 @@ def render_test_explorer(test_name: str, scope_label: str):
 
     st.markdown("---")
 
-    # ── 2. How much data exists each year? ────────────────────────────────────────────────
-    st.markdown("### Readings per year")
-    st.caption("How much monitoring happened for this test in each year of the selected window.")
-    yearly_count_chart(df, f"{test_name} — readings per year")
-
-    st.markdown("---")
-
-    # ── 3. How has the value changed over time? ───────────────────────────────────────────
-    st.markdown("### Trend over time")
-    st.caption(
-        "Monthly median value (line) with the interquartile range shaded behind it. "
-        "Aggregating to monthly medians smooths noise while preserving seasonal and long-term patterns."
-    )
-    monthly_trend_chart(df, f"{test_name} — monthly median over time", unit, remove_outliers=remove_outliers)
-
-    st.markdown("---")
-
-    # ── 4. How often is a threshold exceeded? ────────────────────────────────────────────
+    # ── 4. Threshold exceedance ──────────────────────────────────────────────────────────────────────────────────────────
     st.markdown("### Threshold exceedance")
     st.caption(
         "Set a threshold value below; the chart shows what percentage of readings exceeded it each year. "
@@ -2262,7 +2252,7 @@ def render_test_explorer(test_name: str, scope_label: str):
 
     st.markdown("---")
 
-    # ── 5. Distribution by season and year ───────────────────────────────────────────────────
+    # ── 5. Distribution by season and year ─────────────────────────────────────────────────────────────────────────────────────
     st.markdown("### Distribution by season")
     st.caption(
         "Box plots show the spread of values across the four seasons. The centre line is the median; "
@@ -2276,7 +2266,7 @@ def render_test_explorer(test_name: str, scope_label: str):
 
     st.markdown("---")
 
-    # ── 6. Compare the busiest sites ───────────────────────────────────────────────────────────
+    # ── 6. Compare the busiest sites ──────────────────────────────────────────────────────────────────────────────────────────
     st.markdown("### Comparing the busiest locations")
     st.caption(
         f"There are {human_int(len(sites))} sites measuring this test in the selected window. "
@@ -2306,7 +2296,19 @@ def render_test_explorer(test_name: str, scope_label: str):
         unit, top_n=season_top_n, remove_outliers=remove_outliers,
     )
 
-    # ── 7. Raw rows on demand ───────────────────────────────────────────────────────────────────────
+    st.markdown("---")
+
+    # ── 7. Correlations with other tests ──────────────────────────────────────────────────────────────────────────────────────────
+    st.markdown("### Which tests move with this one?")
+    st.caption(
+        "Correlations are precomputed from site-year median values using Spearman correlation. "
+        "They show broad co-movement across the monitoring network, not direct causation."
+    )
+    render_test_correlation_section(test_name, scope_label)
+
+    st.markdown("---")
+
+    # ── 8. Raw rows on demand ────────────────────────────────────────────────────────────────────────────────────────────
     with st.expander("Show raw readings (first / last 100 rows)", expanded=False):
         show_cols = [c for c in ["Sampling Point", "Date", "result", "Unit",
                                  "Season", "SourceYear", "Latitude", "Longitude"]
