@@ -363,7 +363,16 @@ st.markdown(
         border: 1px solid rgba(255, 255, 255, 0.08);
         border-radius: 12px; padding: 0.2rem;
     }}
+    /* Plotly charts: no card styling here — the card is applied in Python
+       via render_plotly() so maps can opt out cleanly. */
     .stPlotlyChart {{
+        margin-bottom: 1.1rem;
+        clear: both;
+        overflow: visible;
+    }}
+
+    /* Card applied explicitly to non-map charts via the .chart-card wrapper. */
+    .chart-card {{
         background-color: rgba(27, 34, 43, 0.45);
         border: 1px solid rgba(255, 255, 255, 0.06);
         border-radius: 12px;
@@ -372,17 +381,6 @@ st.markdown(
         box-sizing: border-box;
         clear: both;
         overflow: visible;
-    }}
-
-    /* Map charts must not have padding, border-radius, or background —
-       those interfere with Plotly's map controls and the fullscreen overlay. */
-    .map-chart-wrapper .stPlotlyChart {{
-        background: transparent !important;
-        border: none !important;
-        border-radius: 0 !important;
-        padding: 0 !important;
-        margin-bottom: 1.1rem;
-        overflow: visible !important;
     }}
 
     /* Hero banner */
@@ -744,14 +742,15 @@ PLOTLY_CONFIG_MAP = {
 
 
 def render_plotly(fig):
+    """Render a regular chart inside the styled card container."""
+    st.markdown('<div class="chart-card">', unsafe_allow_html=True)
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_map_plotly(fig):
-    """Render a tile-map inside a wrapper that strips the chart card styling."""
-    st.markdown('<div class="map-chart-wrapper">', unsafe_allow_html=True)
+    """Render a tile-map with no card wrapper so controls and colorbar are unclipped."""
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG_MAP)
-    st.markdown('</div>', unsafe_allow_html=True)
 
 
 def metric_grid(items: list[tuple[str, str]]):
