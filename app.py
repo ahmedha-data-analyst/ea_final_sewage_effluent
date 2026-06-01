@@ -59,7 +59,7 @@ st.set_option("client.toolbarMode", "viewer")
 PARQUET_FILE = "EA_final_sewage_effluent_2000_2025_cleaned.parquet"
 SUMMARY_FILE = "EA_final_sewage_det_summary_full.csv"
 LOGO_FILE = "logo.png"
-DETAIL_ROW_LIMIT = 1_000_000
+DETAIL_ROW_LIMIT = 1_200_000
 
 
 # ======================================================
@@ -1746,6 +1746,8 @@ def page_explore_test():
         "Pick any one determinand and see its full story — coverage, trend, seasonality and sites",
     )
     all_tests = list_all_tests()
+    default_test = "Ammoniacal Nitrogen as N"
+    default_index = all_tests.index(default_test) if default_test in all_tests else 0
     info_card(
         "Choose a test from the dropdown below. Everything updates to that determinand: a map of "
         "where it\u2019s measured, how the typical value has moved over 25 years, how it varies by "
@@ -1754,7 +1756,7 @@ def page_explore_test():
     test_name = st.selectbox(
         "Select a test",
         options=all_tests,
-        index=0,
+        index=default_index,
         help="All 454 tests are available. Type to search.",
     )
     st.markdown(f"## {test_name}")
