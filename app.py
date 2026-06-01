@@ -59,7 +59,7 @@ st.set_option("client.toolbarMode", "viewer")
 PARQUET_FILE = "EA_final_sewage_effluent_2000_2025_cleaned.parquet"
 SUMMARY_FILE = "EA_final_sewage_det_summary_full.csv"
 LOGO_FILE = "logo.png"
-DETAIL_ROW_LIMIT = 300_000
+DETAIL_ROW_LIMIT = 1_000_000
 
 
 # ======================================================
