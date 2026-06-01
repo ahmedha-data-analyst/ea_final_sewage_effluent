@@ -374,6 +374,17 @@ st.markdown(
         overflow: visible;
     }}
 
+    /* Map charts must not have padding, border-radius, or background —
+       those interfere with Plotly's map controls and the fullscreen overlay. */
+    .map-chart-wrapper .stPlotlyChart {{
+        background: transparent !important;
+        border: none !important;
+        border-radius: 0 !important;
+        padding: 0 !important;
+        margin-bottom: 1.1rem;
+        overflow: visible !important;
+    }}
+
     /* Hero banner */
     .hero-banner {{
         display: flex; justify-content: space-between; align-items: center; gap: 1.2rem;
@@ -737,8 +748,10 @@ def render_plotly(fig):
 
 
 def render_map_plotly(fig):
-    """Render a tile-map figure with scroll-zoom and full native map controls."""
+    """Render a tile-map inside a wrapper that strips the chart card styling."""
+    st.markdown('<div class="map-chart-wrapper">', unsafe_allow_html=True)
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG_MAP)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 def metric_grid(items: list[tuple[str, str]]):
