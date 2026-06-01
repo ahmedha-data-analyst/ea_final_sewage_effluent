@@ -1503,7 +1503,8 @@ def correlation_matrix_for_tests(test_names: list[str], min_pairs: int) -> pd.Da
         & (corr["Paired site-years"] >= min_pairs)
     ]
     matrix = pd.DataFrame(np.nan, index=tests, columns=tests, dtype="float64")
-    np.fill_diagonal(matrix.values, 1.0)
+    for test in tests:
+        matrix.loc[test, test] = 1.0
     for _, row in rel.iterrows():
         matrix.loc[row["Test"], row["Other Test"]] = row["Spearman r"]
     return matrix
