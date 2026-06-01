@@ -371,8 +371,7 @@ st.markdown(
         margin-bottom: 1.1rem;
         box-sizing: border-box;
         clear: both;
-        overflow: hidden;
-        position: relative;
+        overflow: visible;
     }}
 
     /* Hero banner */
@@ -734,12 +733,12 @@ PLOTLY_CONFIG_MAP = {
 
 
 def render_plotly(fig):
-    st.plotly_chart(fig, width="stretch", config=PLOTLY_CONFIG)
+    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
 
 def render_map_plotly(fig):
     """Render a tile-map figure with scroll-zoom and full native map controls."""
-    st.plotly_chart(fig, width="stretch", config=PLOTLY_CONFIG_MAP)
+    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG_MAP)
 
 
 def metric_grid(items: list[tuple[str, str]]):
@@ -2060,7 +2059,7 @@ def page_overview():
                      "category", "integer", "text", "number", "number"],
         }
     )
-    st.dataframe(schema_df, width="stretch", hide_index=True)
+    st.dataframe(schema_df, use_container_width=True, hide_index=True)
 
     st.markdown("---")
 
@@ -2084,7 +2083,7 @@ def page_overview():
     })
     st.dataframe(
         table,
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
         height=460,
         column_config={
@@ -2347,9 +2346,9 @@ def render_test_explorer(test_name: str, scope_label: str):
                      if c in df.columns]
         d = df.sort_values("Date")
         st.markdown("**First 100**")
-        st.dataframe(d[show_cols].head(100), width="stretch", hide_index=True)
+        st.dataframe(d[show_cols].head(100), use_container_width=True, hide_index=True)
         st.markdown("**Last 100**")
-        st.dataframe(d[show_cols].tail(100), width="stretch", hide_index=True)
+        st.dataframe(d[show_cols].tail(100), use_container_width=True, hide_index=True)
 def page_explore_test():
     hero(
         "Explore a Test",
@@ -2431,7 +2430,7 @@ def page_priority():
         "median": "Median", "p10": "P10", "p90": "P90",
     })
     st.dataframe(
-        table, width="stretch", hide_index=True, height=420,
+        table, use_container_width=True, hide_index=True, height=420,
         column_config={
             "Readings": st.column_config.NumberColumn(format="%d"),
             "Sites": st.column_config.NumberColumn(format="%d"),
