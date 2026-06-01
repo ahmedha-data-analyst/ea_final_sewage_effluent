@@ -1727,6 +1727,31 @@ def overview_data_quality_bars(primary: pd.DataFrame):
         render_plotly(fig)
 
 
+def overview_yearly_readings_chart():
+    """Horizontal bar chart of total readings per year across all tests (from precomputed file)."""
+    year_counts = load_year_counts()
+    if year_counts.empty:
+        return
+    by_year = year_counts.groupby("SourceYear")["n_obs"].sum().reset_index(name="n_obs")
+    by_year = by_year.sort_values("SourceYear", ascending=True)
+    fig = go.Figure(go.Bar(
+        y=by_year["SourceYear"].astype(str),
+        x=by_year["n_obs"],
+        orientation="h",
+        marker=dict(
+            color=by_year["n_obs"],
+            colorscale=[[0.0, SECONDARY_COLOUR], [1.0, PRIMARY_COLOUR]],
+            showscale=False,
+            line=dict(color="rgba(255,255,255,0.10)", width=0.5),
+        ),
+        hovertemplate="<b>%{y}</b><br>%{x:,} readings<extra></extra>",
+    ))
+    fig.update_layout(xaxis_title="Readings", yaxis_title="Year")
+    fig.update_yaxes(type="category", categoryorder="array", categoryarray=by_year["SourceYear"].astype(str).tolist())
+    apply_dark_layout(fig, "Total readings across all tests, by year", height=max(420, 22 * len(by_year) + 120), legend=False)
+    render_plotly(fig)
+
+
 def priority_group_for_test(test_name: str) -> str:
     for group, tests in PRIORITY_GROUPS.items():
         if test_name in tests:
@@ -1877,20 +1902,40 @@ with st.sidebar:
         help="Start with Overview to understand the dataset, then drill into a test.",
         label_visibility="collapsed",
     )
-    st.markdown('<p class="sidebar-section-label">Filters</p>', unsafe_allow_html=True)
-    global_min = totals["first"].date()
-    global_max = totals["last"].date()
-    st.caption("Drag both handles to set the date window")
-    date_range_start, date_range_end = st.slider(
-        "Date range",
-        min_value=global_min,
-        max_value=global_max,
-        value=(global_min, global_max),
-        format="YYYY-MM-DD",
+    st.markdown('<p class="sidebar-section-label">Date window</p>', unsafe_allow_html=True)
+    global_min_year = totals["first"].year
+    global_max_year = totals["last"].year
+
+    # Build a list of 5-year windows, most-recent first.
+    _window_options = []
+    _w_end = global_max_year
+    while _w_end >= global_min_year:
+        _w_start = max(_w_end - 4, global_min_year)
+        _window_options.append(f"{_w_start}–{_w_end}")
+        _w_end -= 5
+    _window_options.append(f"All years ({global_min_year}–{global_max_year})")
+
+    selected_window = st.selectbox(
+        "5-year window",
+        options=_window_options,
+        index=0,
         help=(
-            "Filters detailed maps, selected-test charts, site comparisons and raw rows. "
-            "Precomputed overview summary tables and rankings remain all-time."
+            "Charts and maps show only this period. "
+            "Overview summary stats and rankings always cover the full dataset."
         ),
+        label_visibility="visible",
+    )
+    if selected_window.startswith("All"):
+        import datetime as _dt
+        date_range_start = totals["first"].date()
+        date_range_end = totals["last"].date()
+    else:
+        _yr_parts = selected_window.split("–")
+        import datetime as _dt
+        date_range_start = _dt.date(int(_yr_parts[0]), 1, 1)
+        date_range_end = _dt.date(int(_yr_parts[1]), 12, 31)
+    st.caption(
+        f"Showing: {date_range_start.strftime('%d %b %Y')} → {date_range_end.strftime('%d %b %Y')}"
     )
     st.markdown('<p class="sidebar-section-label">Display</p>', unsafe_allow_html=True)
     remove_outliers = st.toggle(
@@ -1943,7 +1988,16 @@ def page_overview():
         ("Priority tests tracked", f"{totals['n_priority_available']} / 61"),
     ])
 
-    st.markdown("")
+    st.markdown("---")
+
+    st.markdown("## Readings per year")
+    st.caption(
+        "How much monitoring happened each year across all tests. "
+        "Gaps or dips can indicate changes in reporting rather than changes in water quality."
+    )
+    overview_yearly_readings_chart()
+
+    st.markdown("---")
 
     # --- The df.info() / df.head() / df.tail() trio, made friendly ---
     st.markdown("## What one row looks like")
@@ -2105,48 +2159,38 @@ def render_test_explorer(test_name: str, scope_label: str):
     if notes:
         st.caption("Data note: " + "; ".join(notes) + ".")
 
+    # --- All-time summary metrics (always shown, from precomputed summary) ---
     summary_metric_values = [
-        ("Readings", human_int(srow["n_obs"])),
+        ("Readings (all-time)", human_int(srow["n_obs"])),
         ("Sampling points", human_int(srow["n_sites"])),
         ("Years covered", human_int(srow["n_years"])),
         ("Unit", unit),
-        ("Median", human_result_value(srow["median"])),
-        ("P10–P90", f"{human_result_value(srow['p10'])} – {human_result_value(srow['p90'])}"),
+        ("Median (all-time)", human_result_value(srow["median"])),
+        ("​P10–P90", f"{human_result_value(srow['p10'])} – {human_result_value(srow['p90'])}"),
         ("Min / Max", f"{human_result_value(srow['min'])} / {human_result_value(srow['max'])}"),
         ("Period", f"{srow['first_sample'].year}–{srow['last_sample'].year}"),
     ]
-    load_signature = f"{test_name}::{unit}"
-    loaded_key = f"{scope_label}_loaded_test_signature"
-    if st.button("Load analysis", type="primary", key=f"load_analysis_{scope_label}"):
-        st.session_state[loaded_key] = load_signature
+    metric_grid(summary_metric_values)
 
-    if st.session_state.get(loaded_key) != load_signature:
-        metric_grid(summary_metric_values)
-        st.markdown("### Detection pattern")
-        zero_share_chart(srow, f"{test_name} — zero vs non-zero readings")
-        st.markdown("### Which tests move with this one?")
-        st.caption(
-            "Correlations are precomputed from site-year median values using Spearman correlation. "
-            "They show broad co-movement across the monitoring network, not direct causation."
-        )
-        render_test_correlation_section(test_name, scope_label)
-        st.info("Load the selected test to build the detailed map and charts.")
-        return
+    st.markdown("---")
 
+    # --- Correlations are precomputed — show them before loading any row data ---
+    st.markdown("### Which tests move with this one?")
+    st.caption(
+        "Correlations are precomputed from site-year median values using Spearman correlation. "
+        "They show broad co-movement across the monitoring network, not direct causation."
+    )
+    render_test_correlation_section(test_name, scope_label)
+
+    st.markdown("---")
+
+    # --- Safety check: if the window is still too large, warn before loading ---
     estimated_rows = estimate_window_rows(srow, date_range_start, date_range_end)
     if estimated_rows > DETAIL_ROW_LIMIT:
-        metric_grid(summary_metric_values)
-        st.markdown("### Detection pattern")
-        zero_share_chart(srow, f"{test_name} — zero vs non-zero readings")
-        st.markdown("### Which tests move with this one?")
-        st.caption(
-            "Correlations are precomputed from site-year median values using Spearman correlation. "
-            "They show broad co-movement across the monitoring network, not direct causation."
-        )
-        render_test_correlation_section(test_name, scope_label)
         st.warning(
-            f"The selected date window is about {human_int(estimated_rows)} readings. "
-            f"Narrow the date range below about {human_int(DETAIL_ROW_LIMIT)} readings before loading the detailed charts."
+            f"The selected window ({date_range_start.year}–{date_range_end.year}) is estimated at "
+            f"{human_int(estimated_rows)} readings for this test. "
+            "Choose a narrower window from the sidebar to view the detailed charts."
         )
         return
 
@@ -2160,41 +2204,30 @@ def render_test_explorer(test_name: str, scope_label: str):
         )
         sites = site_aggregates_from_frame(df)
 
-    dec = smart_round(df["result"]) if "result" in df.columns else 3
-    metric_grid(detailed_metric_items(df, unit, dec))
-    st.caption(f"Date window: {date_range_start:%Y-%m-%d} to {date_range_end:%Y-%m-%d}.")
-
     if df.empty:
-        st.info("No detailed rows are available for this test in the selected date range.")
+        st.info("No readings are available for this test in the selected date window.")
         return
 
-    st.markdown("---")
-
-    st.markdown("### Detection pattern")
-    zero_share_chart(srow, f"{test_name} — zero vs non-zero readings")
-
-    st.markdown("### Which tests move with this one?")
+    dec = smart_round(df["result"]) if "result" in df.columns else 3
     st.caption(
-        "Correlations are precomputed from site-year median values using Spearman correlation. "
-        "They show broad co-movement across the monitoring network, not direct causation."
+        f"Detailed charts below cover: {date_range_start:%d %b %Y} → {date_range_end:%d %b %Y} "
+        f"({human_int(len(df))} readings loaded)."
     )
-    render_test_correlation_section(test_name, scope_label)
 
-    st.markdown("---")
-
-    # --- Map of this test's sites, coloured by median value ---
+    # ── 1. Where is it measured? ───────────────────────────────────────────────────────
     st.markdown(f"### Where is {test_name} measured?")
+    st.caption(
+        "Each dot is a sampling point. Dot size = how often it’s sampled; "
+        "colour = the site’s median value for the selected window (greener/brighter = higher). "
+        "The extreme 2% of site values are clipped so one outlier doesn’t wash out the colours."
+    )
     map_sites = sites
     map_hidden = 0
     if remove_outliers:
         map_df, map_hidden = iqr_filtered_frame(df.dropna(subset=["result"]).copy(), ["Sampling Point"])
         map_sites = site_aggregates_from_frame(map_df)
-    st.caption(
-        "Each dot is a sampling point. Dot size = how often it\u2019s sampled; "
-        "colour = the site\u2019s median value (greener/brighter = higher). The extreme 2% of "
-        "site values are clipped so one outlier doesn\u2019t wash out the colours."
-        + (f" Outlier filter hidden {human_int(map_hidden)} readings for this map." if map_hidden else "")
-    )
+        if map_hidden:
+            st.caption(f"Outlier filter hid {human_int(map_hidden)} readings for this map.")
     build_sites_map(
         map_sites, title="", colour_metric="median",
         colour_label=f"Median ({unit})" if unit else "Median", unit=unit, height=560,
@@ -2202,39 +2235,52 @@ def render_test_explorer(test_name: str, scope_label: str):
 
     st.markdown("---")
 
-    # --- Readings per year ---
-    st.markdown("### How much data, year by year?")
+    # ── 2. How much data exists each year? ────────────────────────────────────────────────
+    st.markdown("### Readings per year")
+    st.caption("How much monitoring happened for this test in each year of the selected window.")
     yearly_count_chart(df, f"{test_name} — readings per year")
 
     st.markdown("---")
 
-    # --- Trend over time ---
+    # ── 3. How has the value changed over time? ───────────────────────────────────────────
     st.markdown("### Trend over time")
     st.caption(
-        "Monthly median value (line) with the usual spread shaded behind it. Aggregating to "
-        "monthly medians keeps the picture clear despite the volume of underlying readings."
+        "Monthly median value (line) with the interquartile range shaded behind it. "
+        "Aggregating to monthly medians smooths noise while preserving seasonal and long-term patterns."
     )
     monthly_trend_chart(df, f"{test_name} — monthly median over time", unit, remove_outliers=remove_outliers)
 
     st.markdown("---")
 
-    st.markdown("### How often is a threshold exceeded?")
+    # ── 4. How often is a threshold exceeded? ────────────────────────────────────────────
+    st.markdown("### Threshold exceedance")
+    st.caption(
+        "Set a threshold value below; the chart shows what percentage of readings exceeded it each year. "
+        "Defaults to the 90th-percentile value."
+    )
     threshold_exceedance_chart(df, test_name, unit, key=f"threshold_{scope_label}_{test_name}")
 
     st.markdown("---")
 
-    # --- Seasonal and yearly distributions ---
-    st.markdown("### Distribution by season and by year")
+    # ── 5. Distribution by season and year ───────────────────────────────────────────────────
+    st.markdown("### Distribution by season")
+    st.caption(
+        "Box plots show the spread of values across the four seasons. The centre line is the median; "
+        "the box is Q1–Q3; whiskers extend to the last point within 1.5×IQR."
+    )
     seasonal_box_chart(df, f"{test_name} — by season", unit, remove_outliers=remove_outliers)
+
+    st.markdown("### Distribution by year")
+    st.caption("Year-on-year distribution within the selected window. Useful for spotting step changes or gradual drift.")
     yearly_box_chart(df, f"{test_name} — by year", unit, remove_outliers=remove_outliers)
 
     st.markdown("---")
 
-    # --- Compare locations ---
+    # ── 6. Compare the busiest sites ───────────────────────────────────────────────────────────
     st.markdown("### Comparing the busiest locations")
     st.caption(
-        f"There are {human_int(len(sites))} sites measuring this test, so we focus on the "
-        "most-sampled ones. Adjust how many to compare."
+        f"There are {human_int(len(sites))} sites measuring this test in the selected window. "
+        "The chart ranks the most-sampled sites by their median value."
     )
     compare_top_n = site_count_input(
         "Number of busiest sites to compare",
@@ -2247,7 +2293,8 @@ def render_test_explorer(test_name: str, scope_label: str):
         unit, compare_top_n, remove_outliers=remove_outliers,
     )
 
-    st.markdown("### How do the main sites differ by season?")
+    st.markdown("### How do the busiest sites differ by season?")
+    st.caption("Each cell shows the median value for one site in one season, revealing spatial and seasonal patterns together.")
     season_top_n = site_count_input(
         "Number of busiest sites to show by season",
         max_sites=len(sites),
@@ -2259,7 +2306,7 @@ def render_test_explorer(test_name: str, scope_label: str):
         unit, top_n=season_top_n, remove_outliers=remove_outliers,
     )
 
-    # --- Raw rows on demand ---
+    # ── 7. Raw rows on demand ───────────────────────────────────────────────────────────────────────
     with st.expander("Show raw readings (first / last 100 rows)", expanded=False):
         show_cols = [c for c in ["Sampling Point", "Date", "result", "Unit",
                                  "Season", "SourceYear", "Latitude", "Longitude"]
@@ -2269,8 +2316,6 @@ def render_test_explorer(test_name: str, scope_label: str):
         st.dataframe(d[show_cols].head(100), width="stretch", hide_index=True)
         st.markdown("**Last 100**")
         st.dataframe(d[show_cols].tail(100), width="stretch", hide_index=True)
-
-
 def page_explore_test():
     hero(
         "Explore a Test",
