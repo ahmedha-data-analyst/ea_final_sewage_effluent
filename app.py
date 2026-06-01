@@ -28,6 +28,8 @@ Files expected alongside this app.py:
   - logo.png                                     (HydroStar logo)
   - EA_final_sewage_effluent_2000_2025_cleaned.parquet
   - EA_final_sewage_det_summary_full.csv
+  - EA_final_sewage_test_correlations.csv
+  - EA_final_sewage_year_counts.csv
 """
 
 import base64
@@ -58,6 +60,8 @@ st.set_option("client.toolbarMode", "viewer")
 # ======================================================
 PARQUET_FILE = "EA_final_sewage_effluent_2000_2025_cleaned.parquet"
 SUMMARY_FILE = "EA_final_sewage_det_summary_full.csv"
+CORRELATION_FILE = "EA_final_sewage_test_correlations.csv"
+YEAR_COUNTS_FILE = "EA_final_sewage_year_counts.csv"
 LOGO_FILE = "logo.png"
 DETAIL_ROW_LIMIT = 1_200_000
 
@@ -473,6 +477,32 @@ def get_dataset_totals() -> dict:
         "lon_max": float(summary["lon_max"].max()),
         "n_priority_available": int(primary[primary["Test"].isin(PRIORITY_TESTS)]["Test"].nunique()),
     }
+
+
+@st.cache_data(show_spinner=False)
+def load_correlations() -> pd.DataFrame:
+    """Precomputed Spearman correlations between tests using site-year medians."""
+    path = Path(CORRELATION_FILE)
+    if not path.exists():
+        return pd.DataFrame(
+            columns=["Test", "Unit", "Other Test", "Other Unit", "Spearman r", "Paired site-years"]
+        )
+    df = pd.read_csv(path)
+    df["Spearman r"] = pd.to_numeric(df["Spearman r"], errors="coerce")
+    df["Paired site-years"] = pd.to_numeric(df["Paired site-years"], errors="coerce").fillna(0).astype(int)
+    return df.dropna(subset=["Spearman r"])
+
+
+@st.cache_data(show_spinner=False)
+def load_year_counts() -> pd.DataFrame:
+    """Precomputed per-test yearly reading counts."""
+    path = Path(YEAR_COUNTS_FILE)
+    if not path.exists():
+        return pd.DataFrame(columns=["Test", "Unit", "SourceYear", "n_obs"])
+    df = pd.read_csv(path)
+    df["SourceYear"] = pd.to_numeric(df["SourceYear"], errors="coerce").astype("Int64")
+    df["n_obs"] = pd.to_numeric(df["n_obs"], errors="coerce").fillna(0).astype(int)
+    return df.dropna(subset=["SourceYear"])
 
 
 @st.cache_data(show_spinner=False)
@@ -1389,6 +1419,439 @@ def site_season_heatmap(
     render_plotly(fig)
 
 
+def zero_share_chart(summary_row: pd.Series, title: str):
+    """Simple zero vs non-zero split from the summary table."""
+    zero_pct = float(summary_row.get("frac_zero", 0) or 0) * 100
+    non_zero_pct = max(0.0, 100.0 - zero_pct)
+    fig = go.Figure(go.Bar(
+        x=[zero_pct, non_zero_pct],
+        y=["Readings"],
+        orientation="h",
+        marker=dict(color=[WARN_AMBER, PRIMARY_COLOUR]),
+        text=[f"{zero_pct:.1f}%", f"{non_zero_pct:.1f}%"],
+        textposition="inside",
+        hovertemplate="%{x:.1f}%<extra></extra>",
+    ))
+    fig.update_layout(
+        xaxis_title="Share of readings",
+        yaxis_title="",
+        barmode="stack",
+        xaxis=dict(range=[0, 100], ticksuffix="%"),
+    )
+    fig.update_traces(name="")
+    apply_dark_layout(fig, title, height=260, legend=False)
+    render_plotly(fig)
+
+
+def threshold_exceedance_chart(df: pd.DataFrame, test_name: str, unit: str, key: str):
+    """Yearly percentage of readings above a user-selected threshold."""
+    if df.empty or "result" not in df.columns or df["result"].notna().sum() == 0:
+        st.info("No numeric results for a threshold chart.")
+        return
+    values = pd.to_numeric(df["result"], errors="coerce").dropna()
+    default_threshold = float(values.quantile(0.90)) if not values.empty else 0.0
+    threshold = st.number_input(
+        "Threshold",
+        value=default_threshold,
+        format="%.6g",
+        help="Shows the percentage of readings above this value each year.",
+        key=key,
+    )
+    d = df.dropna(subset=["result", "SourceYear"]).copy()
+    if d.empty:
+        st.info("No yearly data for a threshold chart.")
+        return
+    d["above_threshold"] = pd.to_numeric(d["result"], errors="coerce") > threshold
+    yearly = (
+        d.groupby("SourceYear")
+        .agg(readings=("result", "count"), above=("above_threshold", "sum"))
+        .reset_index()
+        .sort_values("SourceYear")
+    )
+    yearly["pct_above"] = np.where(yearly["readings"] > 0, yearly["above"] / yearly["readings"] * 100, 0)
+
+    fig = go.Figure(go.Bar(
+        x=yearly["SourceYear"].astype(str),
+        y=yearly["pct_above"],
+        marker=dict(color=ACCENT_COLOUR),
+        customdata=yearly[["above", "readings"]].values,
+        hovertemplate=(
+            "<b>%{x}</b><br>"
+            "% above threshold: %{y:.1f}%<br>"
+            "Above: %{customdata[0]:,}<br>"
+            "Readings: %{customdata[1]:,}<extra></extra>"
+        ),
+    ))
+    fig.update_layout(
+        xaxis_title="Year",
+        yaxis_title=f"% above {human_result_value(threshold)} {unit}",
+    )
+    fig.update_yaxes(range=[0, max(5, min(100, yearly["pct_above"].max() * 1.15))], ticksuffix="%")
+    apply_dark_layout(fig, f"{test_name} — readings above threshold", height=430, legend=False)
+    render_plotly(fig)
+
+
+def correlation_matrix_for_tests(test_names: list[str], min_pairs: int) -> pd.DataFrame:
+    """Build a square correlation matrix from the precomputed long table."""
+    corr = load_correlations()
+    tests = [t for t in dict.fromkeys(test_names) if t]
+    if corr.empty or not tests:
+        return pd.DataFrame()
+    rel = corr[
+        corr["Test"].isin(tests)
+        & corr["Other Test"].isin(tests)
+        & (corr["Paired site-years"] >= min_pairs)
+    ]
+    matrix = pd.DataFrame(np.nan, index=tests, columns=tests, dtype="float64")
+    np.fill_diagonal(matrix.values, 1.0)
+    for _, row in rel.iterrows():
+        matrix.loc[row["Test"], row["Other Test"]] = row["Spearman r"]
+    return matrix
+
+
+def render_correlation_matrix(test_names: list[str], title: str, min_pairs: int, height: int | None = None):
+    matrix = correlation_matrix_for_tests(test_names, min_pairs)
+    if matrix.empty:
+        st.info("No correlation matrix is available for this selection.")
+        return
+    labels = [truncate_label(t, 30) for t in matrix.index]
+    z = matrix.values
+    text = np.where(np.isfinite(z), np.round(z, 2).astype(str), "")
+    fig = go.Figure(go.Heatmap(
+        z=z,
+        x=labels,
+        y=labels,
+        zmin=-1,
+        zmax=1,
+        colorscale=[
+            [0.0, "#3b1f5f"],
+            [0.5, "#202833"],
+            [1.0, PRIMARY_COLOUR],
+        ],
+        colorbar=dict(title="Spearman r"),
+        text=text,
+        texttemplate="%{text}",
+        hovertemplate="<b>%{y}</b><br>%{x}<br>Spearman r: %{z:.2f}<extra></extra>",
+    ))
+    fig.update_layout(xaxis_title="", yaxis_title="")
+    fig.update_xaxes(tickangle=45, tickfont=dict(size=10))
+    fig.update_yaxes(tickfont=dict(size=10))
+    apply_dark_layout(fig, title, height=height or max(480, 14 * len(labels) + 180), legend=False)
+    render_plotly(fig)
+
+
+def render_test_correlation_section(test_name: str, scope_label: str):
+    """Top positive/negative correlations and a focused mini matrix."""
+    corr = load_correlations()
+    if corr.empty:
+        st.info("Correlation file is not available.")
+        return
+    min_pairs = int(st.number_input(
+        "Minimum paired site-years",
+        min_value=20,
+        max_value=5000,
+        value=100,
+        step=20,
+        help="Higher values keep only correlations based on more shared site-year observations.",
+        key=f"corr_min_pairs_{scope_label}_{test_name}",
+    ))
+    rel = corr[(corr["Test"] == test_name) & (corr["Paired site-years"] >= min_pairs)].copy()
+    if rel.empty:
+        st.info("No correlations meet the current paired-sample threshold.")
+        return
+    pos = rel[rel["Spearman r"] > 0].sort_values("Spearman r", ascending=False).head(8)
+    neg = rel[rel["Spearman r"] < 0].sort_values("Spearman r", ascending=True).head(8)
+    view = pd.concat([neg, pos], ignore_index=True)
+    if view.empty:
+        st.info("No positive or negative correlations meet the current threshold.")
+        return
+    view["label"] = view["Other Test"].map(lambda s: truncate_label(s, 42))
+    colours = np.where(view["Spearman r"] >= 0, PRIMARY_COLOUR, "#e6679a")
+    fig = go.Figure(go.Bar(
+        x=view["Spearman r"],
+        y=view["label"],
+        orientation="h",
+        marker=dict(color=colours),
+        customdata=view[["Other Test", "Other Unit", "Paired site-years"]].values,
+        hovertemplate=(
+            "<b>%{customdata[0]}</b><br>"
+            "Spearman r: %{x:.2f}<br>"
+            "Unit: %{customdata[1]}<br>"
+            "Paired site-years: %{customdata[2]:,}<extra></extra>"
+        ),
+    ))
+    fig.add_vline(x=0, line=dict(color="rgba(255,255,255,0.35)", width=1))
+    fig.update_layout(xaxis_title="Spearman correlation", yaxis_title="")
+    fig.update_xaxes(range=[-1, 1])
+    apply_dark_layout(fig, f"{test_name} — strongest positive and negative relationships", height=520, legend=False)
+    render_plotly(fig)
+
+    matrix_tests = [test_name] + pos["Other Test"].head(5).tolist() + neg["Other Test"].head(5).tolist()
+    render_correlation_matrix(
+        matrix_tests,
+        f"{test_name} — focused correlation matrix",
+        min_pairs=min_pairs,
+        height=max(520, 28 * len(matrix_tests) + 180),
+    )
+
+
+def overview_pareto_chart(primary: pd.DataFrame):
+    """Bar + cumulative line showing concentration of observations across tests."""
+    top = primary.sort_values("n_obs", ascending=False).head(30).copy()
+    top["cum_pct"] = top["n_obs"].cumsum() / primary["n_obs"].sum() * 100
+    labels = top["Test"].map(lambda s: truncate_label(s, 28))
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=labels,
+        y=top["n_obs"],
+        marker=dict(color=PRIMARY_COLOUR),
+        customdata=top[["Test", "n_obs"]].values,
+        hovertemplate="<b>%{customdata[0]}</b><br>%{customdata[1]:,} readings<extra></extra>",
+        name="Readings",
+    ))
+    fig.add_trace(go.Scatter(
+        x=labels,
+        y=top["cum_pct"],
+        mode="lines+markers",
+        yaxis="y2",
+        line=dict(color=ACCENT_COLOUR, width=2),
+        marker=dict(size=7),
+        hovertemplate="Cumulative share: %{y:.1f}%<extra></extra>",
+        name="Cumulative share",
+    ))
+    fig.update_layout(
+        xaxis_title="Top tests",
+        yaxis_title="Readings",
+        yaxis2=dict(title="Cumulative share", overlaying="y", side="right", range=[0, 100], ticksuffix="%"),
+    )
+    fig.update_xaxes(tickangle=45)
+    apply_dark_layout(fig, "How concentrated are readings across tests?", height=560)
+    render_plotly(fig)
+
+
+def overview_richness_scatter(primary: pd.DataFrame):
+    """Sites vs readings scatter; highlights tests with enough coverage to support analysis."""
+    d = primary.copy()
+    d["is_priority"] = d["Test"].isin(PRIORITY_TESTS)
+    fig = go.Figure()
+    for label, mask, colour in [
+        ("Priority", d["is_priority"], PRIMARY_COLOUR),
+        ("Other", ~d["is_priority"], WATER_BLUE),
+    ]:
+        part = d[mask]
+        if part.empty:
+            continue
+        sizes = 8 + (part["n_years"] / max(d["n_years"].max(), 1)) * 18
+        fig.add_trace(go.Scatter(
+            x=part["n_sites"],
+            y=part["n_obs"],
+            mode="markers",
+            name=label,
+            marker=dict(size=sizes, color=colour, opacity=0.72, line=dict(color="rgba(255,255,255,0.25)", width=0.5)),
+            customdata=part[["Test", "Unit", "n_years", "median"]].values,
+            hovertemplate=(
+                "<b>%{customdata[0]}</b><br>"
+                "Unit: %{customdata[1]}<br>"
+                "Sites: %{x:,}<br>"
+                "Readings: %{y:,}<br>"
+                "Years: %{customdata[2]:,}<br>"
+                "Median: %{customdata[3]:.6g}<extra></extra>"
+            ),
+        ))
+    fig.update_layout(xaxis_title="Sampling points", yaxis_title="Readings")
+    fig.update_xaxes(type="log")
+    fig.update_yaxes(type="log")
+    apply_dark_layout(fig, "Which tests are data-rich enough for detailed analysis?", height=560)
+    render_plotly(fig)
+
+
+def overview_timeline_chart(primary: pd.DataFrame):
+    """Date-span strip for the busiest tests."""
+    d = primary.sort_values("n_obs", ascending=False).head(35).copy()
+    d = d.sort_values("first_sample")
+    fig = go.Figure()
+    for _, row in d.iterrows():
+        label = truncate_label(row["Test"], 36)
+        fig.add_trace(go.Scatter(
+            x=[row["first_sample"], row["last_sample"]],
+            y=[label, label],
+            mode="lines+markers",
+            line=dict(color=PRIMARY_COLOUR, width=3),
+            marker=dict(size=6, color=ACCENT_COLOUR),
+            customdata=[[row["Test"], row["n_obs"], row["n_sites"]], [row["Test"], row["n_obs"], row["n_sites"]]],
+            hovertemplate=(
+                "<b>%{customdata[0]}</b><br>"
+                "%{x|%d %b %Y}<br>"
+                "Readings: %{customdata[1]:,}<br>"
+                "Sites: %{customdata[2]:,}<extra></extra>"
+            ),
+            showlegend=False,
+        ))
+    fig.update_layout(xaxis_title="Sampling period", yaxis_title="")
+    apply_dark_layout(fig, "Which tests have long monitoring histories?", height=max(520, 23 * len(d) + 120), legend=False)
+    render_plotly(fig)
+
+
+def overview_data_quality_bars(primary: pd.DataFrame):
+    """Zero-rate and high-value-rate bars from the summary file."""
+    c1, c2 = st.columns(2)
+    with c1:
+        top_zero = primary.sort_values("frac_zero", ascending=False).head(15).sort_values("frac_zero")
+        fig = go.Figure(go.Bar(
+            x=top_zero["frac_zero"] * 100,
+            y=top_zero["Test"].map(lambda s: truncate_label(s, 34)),
+            orientation="h",
+            marker=dict(color=WARN_AMBER),
+            customdata=top_zero[["Test", "n_obs"]].values,
+            hovertemplate="<b>%{customdata[0]}</b><br>%{x:.1f}% zero<br>%{customdata[1]:,} readings<extra></extra>",
+        ))
+        fig.update_layout(xaxis_title="% zero readings", yaxis_title="")
+        fig.update_xaxes(ticksuffix="%")
+        apply_dark_layout(fig, "Tests with the most zero readings", height=520, legend=False)
+        render_plotly(fig)
+    with c2:
+        top_high = primary.sort_values("frac_high", ascending=False).head(15).sort_values("frac_high")
+        fig = go.Figure(go.Bar(
+            x=top_high["frac_high"] * 100,
+            y=top_high["Test"].map(lambda s: truncate_label(s, 34)),
+            orientation="h",
+            marker=dict(color="#e6679a"),
+            customdata=top_high[["Test", "n_obs"]].values,
+            hovertemplate="<b>%{customdata[0]}</b><br>%{x:.1f}% high-value flagged<br>%{customdata[1]:,} readings<extra></extra>",
+        ))
+        fig.update_layout(xaxis_title="% high-value flagged", yaxis_title="")
+        fig.update_xaxes(ticksuffix="%")
+        apply_dark_layout(fig, "Tests with the most high-value flags", height=520, legend=False)
+        render_plotly(fig)
+
+
+def priority_group_for_test(test_name: str) -> str:
+    for group, tests in PRIORITY_GROUPS.items():
+        if test_name in tests:
+            return group
+    return "Other"
+
+
+def priority_coverage_heatmap(view: pd.DataFrame):
+    year_counts = load_year_counts()
+    if year_counts.empty or view.empty:
+        st.info("Yearly coverage file is not available.")
+        return
+    tests = view["Test"].tolist()
+    yc = year_counts[year_counts["Test"].isin(tests)].copy()
+    if yc.empty:
+        st.info("No yearly coverage data for this selection.")
+        return
+    pivot = yc.pivot_table(index="Test", columns="SourceYear", values="n_obs", aggfunc="sum", fill_value=0)
+    order = view.set_index("Test")["n_sites"].sort_values(ascending=False).index.tolist()
+    pivot = pivot.reindex([t for t in order if t in pivot.index])
+    z = np.log10(pivot.values.astype(float) + 1)
+    fig = go.Figure(go.Heatmap(
+        z=z,
+        x=[str(int(y)) for y in pivot.columns],
+        y=pivot.index.tolist(),
+        colorscale=[[0, "#202833"], [0.5, "#4fae3f"], [1, "#f2f77a"]],
+        colorbar=dict(title="Reading intensity"),
+        customdata=pivot.values,
+        hovertemplate="<b>%{y}</b><br>%{x}<br>Readings: %{customdata:,}<extra></extra>",
+    ))
+    fig.update_layout(xaxis_title="Year", yaxis_title="")
+    fig.update_yaxes(tickfont=dict(size=10))
+    apply_dark_layout(fig, "Priority monitoring coverage by year", height=max(520, 15 * len(pivot) + 140), legend=False)
+    render_plotly(fig)
+
+
+def priority_detectability_chart(view: pd.DataFrame):
+    if view.empty:
+        st.info("No priority tests to chart.")
+        return
+    d = view.sort_values("frac_zero", ascending=False).head(30).sort_values("frac_zero")
+    fig = go.Figure(go.Bar(
+        x=d["frac_zero"] * 100,
+        y=d["Test"].map(lambda s: truncate_label(s, 36)),
+        orientation="h",
+        marker=dict(color=WARN_AMBER),
+        customdata=d[["Test", "n_obs"]].values,
+        hovertemplate="<b>%{customdata[0]}</b><br>%{x:.1f}% zero readings<br>%{customdata[1]:,} readings<extra></extra>",
+    ))
+    fig.update_layout(xaxis_title="% zero readings", yaxis_title="")
+    fig.update_xaxes(ticksuffix="%")
+    apply_dark_layout(fig, "Priority tests with the highest zero-reading share", height=max(430, 23 * len(d) + 120), legend=False)
+    render_plotly(fig)
+
+
+def priority_coverage_value_scatter(view: pd.DataFrame):
+    if view.empty:
+        st.info("No priority tests to chart.")
+        return
+    units = view["Unit"].dropna().value_counts().index.tolist()
+    if not units:
+        return
+    default_unit = "mg/l" if "mg/l" in units else units[0]
+    unit = st.selectbox(
+        "Unit for coverage vs typical value",
+        options=units,
+        index=units.index(default_unit),
+        help="This chart compares tests only within one unit, because medians are not comparable across units.",
+        key="priority_coverage_value_unit",
+    )
+    d = view[view["Unit"] == unit].copy()
+    if d.empty:
+        st.info("No priority tests for this unit.")
+        return
+    d["group"] = d["Test"].map(priority_group_for_test)
+    fig = go.Figure()
+    for i, (group, part) in enumerate(d.groupby("group", sort=False)):
+        fig.add_trace(go.Scatter(
+            x=part["n_sites"],
+            y=part["median"],
+            mode="markers",
+            name=group,
+            marker=dict(
+                size=10 + np.sqrt(part["n_obs"].clip(lower=1)) / np.sqrt(d["n_obs"].max()) * 18,
+                color=QUAL_PALETTE[i % len(QUAL_PALETTE)],
+                opacity=0.8,
+                line=dict(color="rgba(255,255,255,0.25)", width=0.5),
+            ),
+            customdata=part[["Test", "n_obs", "p10", "p90"]].values,
+            hovertemplate=(
+                "<b>%{customdata[0]}</b><br>"
+                "Sites: %{x:,}<br>"
+                f"Median: %{{y:.6g}} {unit}<br>"
+                "Readings: %{customdata[1]:,}<br>"
+                "P10-P90: %{customdata[2]:.6g} - %{customdata[3]:.6g}<extra></extra>"
+            ),
+        ))
+    fig.update_layout(xaxis_title="Sampling points", yaxis_title=f"Median ({unit})")
+    fig.update_xaxes(type="log")
+    if (d["median"] > 0).all():
+        fig.update_yaxes(type="log")
+    apply_dark_layout(fig, "Priority coverage vs typical value", height=540)
+    render_plotly(fig)
+
+
+def priority_correlation_matrix(view: pd.DataFrame):
+    if view.empty:
+        st.info("No priority tests selected.")
+        return
+    min_pairs = int(st.number_input(
+        "Minimum paired site-years for matrix",
+        min_value=20,
+        max_value=5000,
+        value=200,
+        step=20,
+        help="Higher values make the matrix more reliable but hide sparse relationships.",
+        key="priority_matrix_min_pairs",
+    ))
+    tests = view["Test"].tolist()
+    render_correlation_matrix(
+        tests,
+        "Priority test correlation matrix",
+        min_pairs=min_pairs,
+        height=max(560, 13 * len(tests) + 180),
+    )
+
+
 # ======================================================
 # SIDEBAR NAVIGATION
 # ======================================================
@@ -1573,6 +2036,39 @@ def page_overview():
         apply_dark_layout(fig, "Top 15 tests by number of sites", height=520, legend=False)
         render_plotly(fig)
 
+    st.markdown("---")
+
+    st.markdown("## How concentrated is the dataset?")
+    st.caption(
+        "A few routine determinands dominate the row count. The cumulative line shows how quickly "
+        "the dataset total is accounted for as you move through the busiest tests."
+    )
+    overview_pareto_chart(primary)
+
+    st.markdown("---")
+
+    st.markdown("## Which tests are data-rich?")
+    st.caption(
+        "Tests in the upper-right have both wide site coverage and many readings. Bubble size shows "
+        "how many years the test appears in; priority tests are highlighted."
+    )
+    overview_richness_scatter(primary)
+
+    st.markdown("---")
+
+    st.markdown("## Monitoring history")
+    st.caption("The busiest tests mostly span the full record, but some determinands have shorter histories.")
+    overview_timeline_chart(primary)
+
+    st.markdown("---")
+
+    st.markdown("## Data quality signals")
+    st.caption(
+        "These bars flag tests where zero readings or high-value flags are common. They do not mean "
+        "the data is wrong; they highlight tests that need extra care when interpreting medians and trends."
+    )
+    overview_data_quality_bars(primary)
+
 
 # ======================================================
 # PAGE 2 — EXPLORE A TEST
@@ -1624,12 +2120,28 @@ def render_test_explorer(test_name: str, scope_label: str):
 
     if st.session_state.get(loaded_key) != load_signature:
         metric_grid(summary_metric_values)
+        st.markdown("### Detection pattern")
+        zero_share_chart(srow, f"{test_name} — zero vs non-zero readings")
+        st.markdown("### Which tests move with this one?")
+        st.caption(
+            "Correlations are precomputed from site-year median values using Spearman correlation. "
+            "They show broad co-movement across the monitoring network, not direct causation."
+        )
+        render_test_correlation_section(test_name, scope_label)
         st.info("Load the selected test to build the detailed map and charts.")
         return
 
     estimated_rows = estimate_window_rows(srow, date_range_start, date_range_end)
     if estimated_rows > DETAIL_ROW_LIMIT:
         metric_grid(summary_metric_values)
+        st.markdown("### Detection pattern")
+        zero_share_chart(srow, f"{test_name} — zero vs non-zero readings")
+        st.markdown("### Which tests move with this one?")
+        st.caption(
+            "Correlations are precomputed from site-year median values using Spearman correlation. "
+            "They show broad co-movement across the monitoring network, not direct causation."
+        )
+        render_test_correlation_section(test_name, scope_label)
         st.warning(
             f"The selected date window is about {human_int(estimated_rows)} readings. "
             f"Narrow the date range below about {human_int(DETAIL_ROW_LIMIT)} readings before loading the detailed charts."
@@ -1653,6 +2165,18 @@ def render_test_explorer(test_name: str, scope_label: str):
     if df.empty:
         st.info("No detailed rows are available for this test in the selected date range.")
         return
+
+    st.markdown("---")
+
+    st.markdown("### Detection pattern")
+    zero_share_chart(srow, f"{test_name} — zero vs non-zero readings")
+
+    st.markdown("### Which tests move with this one?")
+    st.caption(
+        "Correlations are precomputed from site-year median values using Spearman correlation. "
+        "They show broad co-movement across the monitoring network, not direct causation."
+    )
+    render_test_correlation_section(test_name, scope_label)
 
     st.markdown("---")
 
@@ -1689,6 +2213,11 @@ def render_test_explorer(test_name: str, scope_label: str):
         "monthly medians keeps the picture clear despite the volume of underlying readings."
     )
     monthly_trend_chart(df, f"{test_name} — monthly median over time", unit, remove_outliers=remove_outliers)
+
+    st.markdown("---")
+
+    st.markdown("### How often is a threshold exceeded?")
+    threshold_exceedance_chart(df, test_name, unit, key=f"threshold_{scope_label}_{test_name}")
 
     st.markdown("---")
 
@@ -1844,6 +2373,34 @@ def page_priority():
     fig.update_layout(xaxis_title="Sampling points", yaxis_title="")
     apply_dark_layout(fig, None, height=max(420, 22 * len(rank) + 120), legend=False)
     render_plotly(fig)
+
+    st.markdown("---")
+
+    st.markdown("## Monitoring coverage by year")
+    st.caption(
+        "Each cell shows how much monitoring exists for a priority test in a year. Dark cells mean "
+        "little or no data; brighter cells mean more readings."
+    )
+    priority_coverage_heatmap(view)
+
+    st.markdown("---")
+
+    st.markdown("## Priority test correlations")
+    st.caption(
+        "This matrix uses precomputed Spearman correlations between site-year medians. It is best "
+        "read as a screening view for tests that tend to move together across sites and years."
+    )
+    priority_correlation_matrix(view)
+
+    st.markdown("---")
+
+    st.markdown("## Detectability and typical values")
+    st.caption(
+        "Zero-heavy tests and tests with sparse coverage need different interpretation from widely "
+        "measured routine determinands."
+    )
+    priority_detectability_chart(view)
+    priority_coverage_value_scatter(view)
 
     st.markdown("---")
 
