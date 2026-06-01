@@ -634,6 +634,25 @@ def human_int(n) -> str:
     return f"{int(n):,}"
 
 
+def human_result_value(value) -> str:
+    """Compact result display that keeps trace concentrations visible."""
+    if pd.isna(value):
+        return "n/a"
+    value = float(value)
+    if value == 0:
+        return "0"
+    abs_value = abs(value)
+    if abs_value >= 1000:
+        return f"{value:,.0f}"
+    if abs_value >= 100:
+        return f"{value:,.1f}".rstrip("0").rstrip(".")
+    if abs_value >= 1:
+        return f"{value:,.3f}".rstrip("0").rstrip(".")
+    if abs_value >= 0.000001:
+        return f"{value:.6f}".rstrip("0").rstrip(".")
+    return f"{value:.2e}"
+
+
 def estimate_window_rows(summary_row: pd.Series, start_date, end_date) -> int:
     """Estimate rows for a selected date window without scanning the parquet."""
     first = pd.Timestamp(summary_row["first_sample"])
@@ -1520,11 +1539,11 @@ def page_overview():
         column_config={
             "Readings": st.column_config.NumberColumn(format="%d"),
             "Sites": st.column_config.NumberColumn(format="%d"),
-            "Median": st.column_config.NumberColumn(format="%.3f"),
-            "P10": st.column_config.NumberColumn(format="%.3f"),
-            "P90": st.column_config.NumberColumn(format="%.3f"),
-            "Min": st.column_config.NumberColumn(format="%.3f"),
-            "Max": st.column_config.NumberColumn(format="%.3f"),
+            "Median": st.column_config.NumberColumn(format="%.6g"),
+            "P10": st.column_config.NumberColumn(format="%.6g"),
+            "P90": st.column_config.NumberColumn(format="%.6g"),
+            "Min": st.column_config.NumberColumn(format="%.6g"),
+            "Max": st.column_config.NumberColumn(format="%.6g"),
         },
     )
 
@@ -1593,9 +1612,9 @@ def render_test_explorer(test_name: str, scope_label: str):
         ("Sampling points", human_int(srow["n_sites"])),
         ("Years covered", human_int(srow["n_years"])),
         ("Unit", unit),
-        ("Median", f"{srow['median']:,.3f}"),
-        ("P10–P90", f"{srow['p10']:,.3f} – {srow['p90']:,.3f}"),
-        ("Min / Max", f"{srow['min']:,.3f} / {srow['max']:,.3f}"),
+        ("Median", human_result_value(srow["median"])),
+        ("P10–P90", f"{human_result_value(srow['p10'])} – {human_result_value(srow['p90'])}"),
+        ("Min / Max", f"{human_result_value(srow['min'])} / {human_result_value(srow['max'])}"),
         ("Period", f"{srow['first_sample'].year}–{srow['last_sample'].year}"),
     ]
     load_signature = f"{test_name}::{unit}"
@@ -1627,7 +1646,7 @@ def render_test_explorer(test_name: str, scope_label: str):
         )
         sites = site_aggregates_from_frame(df)
 
-    dec = 3
+    dec = smart_round(df["result"]) if "result" in df.columns else 3
     metric_grid(detailed_metric_items(df, unit, dec))
     st.caption(f"Date window: {date_range_start:%Y-%m-%d} to {date_range_end:%Y-%m-%d}.")
 
@@ -1804,9 +1823,9 @@ def page_priority():
         column_config={
             "Readings": st.column_config.NumberColumn(format="%d"),
             "Sites": st.column_config.NumberColumn(format="%d"),
-            "Median": st.column_config.NumberColumn(format="%.4f"),
-            "P10": st.column_config.NumberColumn(format="%.4f"),
-            "P90": st.column_config.NumberColumn(format="%.4f"),
+            "Median": st.column_config.NumberColumn(format="%.6g"),
+            "P10": st.column_config.NumberColumn(format="%.6g"),
+            "P90": st.column_config.NumberColumn(format="%.6g"),
         },
     )
 
