@@ -718,11 +718,27 @@ PLOTLY_CONFIG = {
     "displaylogo": False,
     "responsive": True,
     "modeBarButtonsToRemove": ["lasso2d", "select2d"],
+    "modeBarButtonsToAdd": ["toImage"],
+    "toImageButtonOptions": {"format": "png", "scale": 2},
+}
+
+# Maps need scroll-zoom enabled and should keep all native map controls.
+PLOTLY_CONFIG_MAP = {
+    "displaylogo": False,
+    "responsive": True,
+    "scrollZoom": True,
+    "modeBarButtonsToAdd": ["toImage"],
+    "toImageButtonOptions": {"format": "png", "scale": 2},
 }
 
 
 def render_plotly(fig):
     st.plotly_chart(fig, width="stretch", config=PLOTLY_CONFIG)
+
+
+def render_map_plotly(fig):
+    """Render a tile-map figure with scroll-zoom and full native map controls."""
+    st.plotly_chart(fig, width="stretch", config=PLOTLY_CONFIG_MAP)
 
 
 def metric_grid(items: list[tuple[str, str]]):
@@ -1035,7 +1051,7 @@ def build_sites_map(
         title=dict(text=title, font=dict(size=18, color=TEXT_COL, family="Hind, sans-serif")) if title else None,
         font=dict(color=TEXT_COL),
     )
-    render_plotly(fig)
+    render_map_plotly(fig)
 
 
 # ======================================================
@@ -1548,27 +1564,42 @@ def render_test_correlation_section(test_name: str, scope_label: str):
     if corr.empty:
         st.info("Correlation file is not available.")
         return
-    min_pairs = int(st.number_input(
-        "Minimum paired site-years",
-        min_value=20,
-        max_value=5000,
-        value=100,
-        step=20,
-        help="Higher values keep only correlations based on more shared site-year observations.",
-        key=f"corr_min_pairs_{scope_label}_{test_name}",
-    ))
+
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        min_pairs = int(st.number_input(
+            "Minimum paired site-years",
+            min_value=20,
+            max_value=5000,
+            value=100,
+            step=20,
+            help="Only include correlations built from at least this many shared site-years. Higher = more reliable but fewer results.",
+            key=f"corr_min_pairs_{scope_label}_{test_name}",
+        ))
+    with c2:
+        top_n = int(st.number_input(
+            "Show top N per direction",
+            min_value=3,
+            max_value=25,
+            value=8,
+            step=1,
+            help="How many of the strongest positive and negative correlations to display in the bar chart and matrix.",
+            key=f"corr_top_n_{scope_label}_{test_name}",
+        ))
+
     rel = corr[(corr["Test"] == test_name) & (corr["Paired site-years"] >= min_pairs)].copy()
     if rel.empty:
         st.info("No correlations meet the current paired-sample threshold.")
         return
-    pos = rel[rel["Spearman r"] > 0].sort_values("Spearman r", ascending=False).head(8)
-    neg = rel[rel["Spearman r"] < 0].sort_values("Spearman r", ascending=True).head(8)
+    pos = rel[rel["Spearman r"] > 0].sort_values("Spearman r", ascending=False).head(top_n)
+    neg = rel[rel["Spearman r"] < 0].sort_values("Spearman r", ascending=True).head(top_n)
     view = pd.concat([neg, pos], ignore_index=True)
     if view.empty:
         st.info("No positive or negative correlations meet the current threshold.")
         return
     view["label"] = view["Other Test"].map(lambda s: truncate_label(s, 42))
     colours = np.where(view["Spearman r"] >= 0, PRIMARY_COLOUR, "#e6679a")
+    bar_height = max(420, 26 * len(view) + 120)
     fig = go.Figure(go.Bar(
         x=view["Spearman r"],
         y=view["label"],
@@ -1585,10 +1616,10 @@ def render_test_correlation_section(test_name: str, scope_label: str):
     fig.add_vline(x=0, line=dict(color="rgba(255,255,255,0.35)", width=1))
     fig.update_layout(xaxis_title="Spearman correlation", yaxis_title="")
     fig.update_xaxes(range=[-1, 1])
-    apply_dark_layout(fig, f"{test_name} — strongest positive and negative relationships", height=520, legend=False)
+    apply_dark_layout(fig, f"{test_name} — strongest positive and negative relationships", height=bar_height, legend=False)
     render_plotly(fig)
 
-    matrix_tests = [test_name] + pos["Other Test"].head(5).tolist() + neg["Other Test"].head(5).tolist()
+    matrix_tests = [test_name] + pos["Other Test"].tolist() + neg["Other Test"].tolist()
     render_correlation_matrix(
         matrix_tests,
         f"{test_name} — focused correlation matrix",
