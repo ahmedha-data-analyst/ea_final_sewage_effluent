@@ -371,7 +371,8 @@ st.markdown(
         margin-bottom: 1.1rem;
         box-sizing: border-box;
         clear: both;
-        overflow: visible;
+        overflow: hidden;
+        position: relative;
     }}
 
     /* Hero banner */
