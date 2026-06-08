@@ -110,6 +110,22 @@ SEASON_BY_MONTH = {
 MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
+# ======================================================
+# LIGHT THEME COLOURS (HydroStar brand on white)
+# ------------------------------------------------------
+# Used when the user switches the sidebar "Light mode" toggle.
+# Primary/secondary greens, QUAL_PALETTE, and SEASON_COLOURS
+# are shared — they are saturated enough to read on any background.
+# ======================================================
+LT_BACKGROUND  = "#f7f9f4"   # off-white with a faint green tint
+LT_PANEL_BG    = "#ffffff"
+LT_TEXT_COL    = "#1a2010"   # very dark green-grey
+LT_SUBTEXT_COL = "#4a5240"
+LT_SIDEBAR_BG  = "#eef3e6"   # pale green sidebar
+LT_GRID        = "rgba(0,0,0,0.08)"
+LT_LINE        = "rgba(0,0,0,0.20)"
+LT_HOVER_BG    = "#f0f7e0"
+
 
 # The 61 regulator-priority determinands (page 3).
 PRIORITY_TESTS = [
@@ -167,272 +183,325 @@ PRIORITY_GROUPS = {
 
 
 # ======================================================
-# GLOBAL CSS  (dark, on-brand)
+# GLOBAL CSS — injected per-run based on active theme
 # ======================================================
-st.markdown(
-    f"""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Hind:wght@300;400;500;600;700&display=swap');
+def inject_css(theme: str = "dark"):
+    """Emit one CSS block for the active theme (dark or light)."""
+    is_light = theme == "light"
 
-    :root {{
-        --hs-primary: {PRIMARY_COLOUR};
-        --hs-secondary: {SECONDARY_COLOUR};
-        --hs-bg: {BACKGROUND};
-        --hs-card: {PANEL_BG};
-        --hs-text: {TEXT_COL};
-        --hs-subtext: {SUBTEXT_COL};
-        --hs-sidebar: {DARK_GREY};
-    }}
-
-    html, body, [class*="css"] {{ font-family: 'Hind', sans-serif; }}
-
-    .stApp {{
-        background:
-            radial-gradient(circle at top right, rgba(167, 215, 48, 0.11) 0%, rgba(14, 17, 23, 0) 35%),
-            radial-gradient(circle at bottom left, rgba(78, 168, 222, 0.08) 0%, rgba(14, 17, 23, 0) 40%),
-            var(--hs-bg);
-        color: var(--hs-text);
-    }}
-    .block-container {{
-        max-width: 1520px;
-        padding: 1.8rem clamp(1rem, 2.2vw, 2.4rem) 2rem clamp(1rem, 2.2vw, 2.4rem);
-        color: var(--hs-text);
-    }}
-    h1, h2, h3, h4, h5, h6 {{ color: var(--hs-text) !important; font-weight: 700; letter-spacing: 0.1px; }}
-    p, span, label {{ color: var(--hs-text) !important; }}
-    .stCaption, .stMarkdown small {{ color: var(--hs-subtext) !important; }}
-
-    section[data-testid="stSidebar"] > div {{
-        background:
-            linear-gradient(180deg, rgba(48, 52, 60, 0.98) 0%, rgba(28, 34, 43, 0.98) 72%, rgba(20, 25, 32, 0.98) 100%);
-        border-right: 1px solid rgba(255, 255, 255, 0.10);
-    }}
-    section[data-testid="stSidebar"] .stMarkdown p,
-    section[data-testid="stSidebar"] .stMarkdown span,
-    section[data-testid="stSidebar"] label {{ color: #ffffff !important; }}
-    section[data-testid="stSidebar"] hr {{
-        margin: 1rem 0;
-        border-color: rgba(255, 255, 255, 0.12);
-    }}
-    section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {{ gap: 0.6rem; }}
-    section[data-testid="stSidebar"] .stRadio > label,
-    section[data-testid="stSidebar"] .stToggle > label {{
-        font-weight: 700;
-    }}
-    section[data-testid="stSidebar"] div[role="radiogroup"] label {{
-        background: rgba(255, 255, 255, 0.055);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 10px;
-        padding: 0.35rem 0.55rem;
-        margin-bottom: 0.35rem;
-    }}
-    section[data-testid="stSidebar"] div[role="radiogroup"] label:hover {{
-        background: rgba(167, 215, 48, 0.12);
-        border-color: rgba(167, 215, 48, 0.30);
-    }}
-
-    .sidebar-title-card {{
-        padding: 1rem 1rem 0.9rem 1rem;
-        border-radius: 14px;
-        background: linear-gradient(135deg, rgba(167, 215, 48, 0.16), rgba(78, 168, 222, 0.10));
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        margin-bottom: 0.75rem;
-    }}
-    .sidebar-kicker {{
-        color: var(--hs-primary) !important;
-        font-size: 0.78rem;
-        font-weight: 700;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
-        margin: 0 0 0.25rem 0;
-    }}
-    .sidebar-title {{
-        color: #ffffff !important;
-        font-size: 1.3rem;
-        font-weight: 700;
-        line-height: 1.1;
-        margin: 0;
-    }}
-    .sidebar-subtitle {{
-        color: rgba(255, 255, 255, 0.74) !important;
-        font-size: 0.9rem;
-        margin: 0.35rem 0 0 0;
-    }}
-    .sidebar-section-label {{
-        color: rgba(255, 255, 255, 0.66) !important;
-        font-size: 0.76rem;
-        font-weight: 700;
-        letter-spacing: 0.07em;
-        text-transform: uppercase;
-        margin: 0.35rem 0 0.2rem 0;
-    }}
-    .sidebar-stats-grid {{
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 0.55rem;
-        margin-top: 0.2rem;
-    }}
-    .sidebar-stat {{
-        background: rgba(255, 255, 255, 0.055);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 10px;
-        padding: 0.58rem 0.65rem;
-    }}
-    .sidebar-stat b {{
-        display: block;
-        color: #ffffff !important;
-        font-size: 1rem;
-        line-height: 1.1;
-    }}
-    .sidebar-stat span {{
-        display: block;
-        color: rgba(255, 255, 255, 0.62) !important;
-        font-size: 0.74rem;
-        line-height: 1.15;
-        margin-top: 0.2rem;
-    }}
-
-    div[data-baseweb="select"] > div,
-    div[data-baseweb="input"] > div {{
-        background-color: rgba(255, 255, 255, 0.06);
-        border-color: rgba(255, 255, 255, 0.16);
-    }}
-    .stSelectbox > div > div, .stMultiSelect > div > div {{ background-color: rgba(255, 255, 255, 0.06); }}
-    .stSlider > div > div > div {{ background-color: rgba(167, 215, 48, 0.18); }}
-    .stSlider [data-testid="stTickBar"] > div {{ background-color: rgba(167, 215, 48, 0.40); }}
-
-    .stButton > button, .stDownloadButton > button {{
-        background-color: var(--hs-primary); color: #1d2430;
-        font-weight: 700; border: none; border-radius: 8px;
-    }}
-    .stButton > button:hover, .stDownloadButton > button:hover {{
-        background-color: var(--hs-secondary); color: #ffffff;
-    }}
-
-    div[data-testid="stMetric"] {{
-        background: linear-gradient(180deg, rgba(27, 34, 43, 0.96) 0%, rgba(22, 29, 37, 0.96) 100%);
-        border: 1px solid rgba(255, 255, 255, 0.10);
-        border-left: 5px solid var(--hs-primary);
-        border-radius: 12px;
-        padding: 0.85rem 1rem;
-        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.24);
-    }}
-    div[data-testid="stMetric"] label {{
-        color: var(--hs-subtext) !important;
-        font-size: 0.82rem !important; letter-spacing: 0.35px; text-transform: uppercase;
-    }}
-    div[data-testid="stMetric"] [data-testid="stMetricValue"] {{
-        color: var(--hs-text) !important; font-weight: 700; line-height: 1.1;
-    }}
-    .metric-grid {{
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 0.85rem;
-        margin: 0.25rem 0 0.95rem 0;
-    }}
-    .metric-tile {{
-        min-width: 0;
-        background: linear-gradient(180deg, rgba(27, 34, 43, 0.96) 0%, rgba(22, 29, 37, 0.96) 100%);
-        border: 1px solid rgba(255, 255, 255, 0.10);
-        border-left: 5px solid var(--hs-primary);
-        border-radius: 12px;
-        padding: 0.85rem 1rem;
-        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.24);
-    }}
-    .metric-label {{
-        display: block;
-        color: var(--hs-subtext) !important;
-        font-size: 0.78rem;
-        font-weight: 700;
-        letter-spacing: 0.04em;
-        line-height: 1.15;
-        text-transform: uppercase;
-        margin-bottom: 0.35rem;
-    }}
-    .metric-value {{
-        display: block;
-        color: var(--hs-text) !important;
-        font-size: clamp(1.22rem, 1.7vw, 1.8rem);
-        font-weight: 700;
-        line-height: 1.08;
-        overflow-wrap: anywhere;
-    }}
-
-    div[data-testid="stDataFrame"] {{
-        background-color: rgba(27, 34, 43, 0.96);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 12px; padding: 0.2rem;
-    }}
-    /* Plotly charts: no card styling here — the card is applied in Python
-       via render_plotly() so maps can opt out cleanly. */
-    .stPlotlyChart {{
-        margin-bottom: 1.1rem;
-        clear: both;
-        overflow: visible;
-    }}
-
-    /* Card applied explicitly to non-map charts via the .chart-card wrapper. */
-    .chart-card {{
-        background-color: rgba(27, 34, 43, 0.45);
-        border: 1px solid rgba(255, 255, 255, 0.06);
-        border-radius: 12px;
-        padding: 0.55rem 1.45rem 0.25rem 0.55rem;
-        margin-bottom: 1.1rem;
-        box-sizing: border-box;
-        clear: both;
-        overflow: visible;
-    }}
-
-    /* Hero banner */
-    .hero-banner {{
-        display: flex; justify-content: space-between; align-items: center; gap: 1.2rem;
-        padding: 1.1rem 1.4rem; border-radius: 14px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        background: linear-gradient(90deg,
-            rgba(12, 16, 24, 0.92) 0%, rgba(18, 30, 22, 0.88) 70%, rgba(29, 52, 33, 0.78) 100%);
-        margin-bottom: 1.3rem;
-    }}
-    .hero-copy {{ max-width: 72%; }}
-    .hero-title {{ margin: 0; color: var(--hs-text); font-size: clamp(1.8rem, 2.6vw, 2.6rem); line-height: 1.1; font-weight: 700; }}
-    .hero-subtitle {{ margin: 0.4rem 0 0 0; color: var(--hs-subtext); font-size: 1rem; }}
-    .hero-logos {{ display: flex; align-items: center; justify-content: flex-end; gap: 1rem; }}
-    .hero-logos img {{ height: 96px; width: auto; object-fit: contain; filter: drop-shadow(0 6px 14px rgba(0,0,0,0.35)); }}
-
-    /* Soft info card */
-    .soft-card {{
-        background: rgba(27, 34, 43, 0.7);
-        border: 1px solid rgba(255,255,255,0.08);
-        border-left: 4px solid var(--hs-primary);
-        border-radius: 12px; padding: 0.9rem 1.1rem; margin-bottom: 0.9rem;
-    }}
-    .soft-card p {{ margin: 0; color: var(--hs-subtext) !important; font-size: 0.95rem; }}
-
-    @media (max-width: 1080px) {{
-        .hero-banner {{ flex-direction: column; align-items: flex-start; }}
-        .hero-copy {{ max-width: 100%; }}
-        .hero-logos {{ justify-content: flex-start; }}
-        .hero-logos img {{ height: 74px; }}
-        .metric-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
-    }}
-    @media (max-width: 760px) {{
-        .block-container {{ padding: 1rem 0.8rem 1.5rem 0.8rem; }}
-        .stPlotlyChart {{
-            border-radius: 10px;
-            padding: 0.35rem 0.5rem 0.1rem 0.35rem;
-            margin-bottom: 0.9rem;
+    # --- theme-dependent values ---
+    if is_light:
+        bg_css = f"""
+        .stApp {{
+            background:
+                radial-gradient(circle at top right, rgba(167, 215, 48, 0.09) 0%, rgba(247, 249, 244, 0) 35%),
+                radial-gradient(circle at bottom left, rgba(73, 152, 35, 0.06) 0%, rgba(247, 249, 244, 0) 40%),
+                {LT_BACKGROUND};
+            color: {LT_TEXT_COL};
+        }}"""
+        text_rules = f"""
+        h1, h2, h3, h4, h5, h6 {{ color: {LT_TEXT_COL} !important; font-weight: 700; letter-spacing: 0.1px; }}
+        p, span, label {{ color: {LT_TEXT_COL} !important; }}
+        .stCaption, .stMarkdown small {{ color: {LT_SUBTEXT_COL} !important; }}"""
+        sidebar_bg = f"""
+        section[data-testid="stSidebar"] > div {{
+            background: linear-gradient(180deg, {LT_SIDEBAR_BG} 0%, #e6f0da 100%);
+            border-right: 1px solid rgba(73, 152, 35, 0.20);
+        }}"""
+        sidebar_text = f"""
+        section[data-testid="stSidebar"] .stMarkdown p,
+        section[data-testid="stSidebar"] .stMarkdown span,
+        section[data-testid="stSidebar"] label {{ color: {LT_TEXT_COL} !important; }}
+        section[data-testid="stSidebar"] hr {{
+            margin: 1rem 0; border-color: rgba(73, 152, 35, 0.20);
+        }}"""
+        sidebar_radio = f"""
+        section[data-testid="stSidebar"] div[role="radiogroup"] label {{
+            background: rgba(167, 215, 48, 0.10);
+            border: 1px solid rgba(73, 152, 35, 0.20);
+            border-radius: 10px; padding: 0.35rem 0.55rem; margin-bottom: 0.35rem;
         }}
-        .hero-banner {{ padding: 0.95rem 1rem; border-radius: 12px; }}
-        .hero-title {{ font-size: 1.55rem; }}
-        .hero-subtitle {{ font-size: 0.92rem; }}
-        .hero-logos img {{ height: 58px; }}
-        .metric-grid {{ grid-template-columns: 1fr; gap: 0.65rem; }}
-        .metric-tile {{ padding: 0.72rem 0.8rem; border-radius: 10px; }}
-        .metric-value {{ font-size: 1.2rem; }}
-    }}
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+        section[data-testid="stSidebar"] div[role="radiogroup"] label:hover {{
+            background: rgba(167, 215, 48, 0.22);
+            border-color: rgba(73, 152, 35, 0.45);
+        }}"""
+        title_card = f"""
+        .sidebar-title-card {{
+            padding: 1rem 1rem 0.9rem 1rem; border-radius: 14px;
+            background: linear-gradient(135deg, rgba(167, 215, 48, 0.18), rgba(73, 152, 35, 0.10));
+            border: 1px solid rgba(73, 152, 35, 0.25); margin-bottom: 0.75rem;
+        }}"""
+        sidebar_title_col  = LT_TEXT_COL
+        sidebar_sub_col    = LT_SUBTEXT_COL
+        sidebar_label_col  = LT_SUBTEXT_COL
+        sidebar_stat_bg    = "rgba(255,255,255,0.70)"
+        sidebar_stat_bdr   = "rgba(73, 152, 35, 0.20)"
+        sidebar_stat_b_col = LT_TEXT_COL
+        sidebar_stat_s_col = LT_SUBTEXT_COL
+        input_bg           = "rgba(255,255,255,0.85)"
+        input_bdr          = "rgba(73, 152, 35, 0.30)"
+        metric_bg          = f"linear-gradient(180deg, #ffffff 0%, #f7f9f4 100%)"
+        metric_bdr         = "rgba(73, 152, 35, 0.15)"
+        metric_val_col     = LT_TEXT_COL
+        metric_lbl_col     = LT_SUBTEXT_COL
+        dataframe_bg       = "#ffffff"
+        dataframe_bdr      = "rgba(73, 152, 35, 0.15)"
+        chart_card_bg      = "rgba(255,255,255,0.80)"
+        chart_card_bdr     = "rgba(73, 152, 35, 0.14)"
+        hero_bg            = "linear-gradient(90deg, rgba(247,249,244,0.97) 0%, rgba(230,240,218,0.95) 70%, rgba(210,235,185,0.90) 100%)"
+        hero_bdr           = "rgba(73, 152, 35, 0.20)"
+        soft_card_bg       = "rgba(240,247,224,0.80)"
+        soft_card_bdr      = "rgba(73, 152, 35, 0.15)"
+        soft_card_p_col    = LT_SUBTEXT_COL
+        block_col          = LT_TEXT_COL
+    else:
+        bg_css = f"""
+        .stApp {{
+            background:
+                radial-gradient(circle at top right, rgba(167, 215, 48, 0.11) 0%, rgba(14, 17, 23, 0) 35%),
+                radial-gradient(circle at bottom left, rgba(78, 168, 222, 0.08) 0%, rgba(14, 17, 23, 0) 40%),
+                {BACKGROUND};
+            color: {TEXT_COL};
+        }}"""
+        text_rules = f"""
+        h1, h2, h3, h4, h5, h6 {{ color: {TEXT_COL} !important; font-weight: 700; letter-spacing: 0.1px; }}
+        p, span, label {{ color: {TEXT_COL} !important; }}
+        .stCaption, .stMarkdown small {{ color: {SUBTEXT_COL} !important; }}"""
+        sidebar_bg = """
+        section[data-testid="stSidebar"] > div {
+            background:
+                linear-gradient(180deg, rgba(48, 52, 60, 0.98) 0%, rgba(28, 34, 43, 0.98) 72%, rgba(20, 25, 32, 0.98) 100%);
+            border-right: 1px solid rgba(255, 255, 255, 0.10);
+        }"""
+        sidebar_text = """
+        section[data-testid="stSidebar"] .stMarkdown p,
+        section[data-testid="stSidebar"] .stMarkdown span,
+        section[data-testid="stSidebar"] label { color: #ffffff !important; }
+        section[data-testid="stSidebar"] hr {
+            margin: 1rem 0; border-color: rgba(255, 255, 255, 0.12);
+        }"""
+        sidebar_radio = """
+        section[data-testid="stSidebar"] div[role="radiogroup"] label {
+            background: rgba(255, 255, 255, 0.055);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px; padding: 0.35rem 0.55rem; margin-bottom: 0.35rem;
+        }
+        section[data-testid="stSidebar"] div[role="radiogroup"] label:hover {
+            background: rgba(167, 215, 48, 0.12);
+            border-color: rgba(167, 215, 48, 0.30);
+        }"""
+        title_card = """
+        .sidebar-title-card {
+            padding: 1rem 1rem 0.9rem 1rem; border-radius: 14px;
+            background: linear-gradient(135deg, rgba(167, 215, 48, 0.16), rgba(78, 168, 222, 0.10));
+            border: 1px solid rgba(255, 255, 255, 0.12); margin-bottom: 0.75rem;
+        }"""
+        sidebar_title_col  = "#ffffff"
+        sidebar_sub_col    = "rgba(255,255,255,0.74)"
+        sidebar_label_col  = "rgba(255,255,255,0.66)"
+        sidebar_stat_bg    = "rgba(255,255,255,0.055)"
+        sidebar_stat_bdr   = "rgba(255,255,255,0.08)"
+        sidebar_stat_b_col = "#ffffff"
+        sidebar_stat_s_col = "rgba(255,255,255,0.62)"
+        input_bg           = "rgba(255,255,255,0.06)"
+        input_bdr          = "rgba(255,255,255,0.16)"
+        metric_bg          = "linear-gradient(180deg, rgba(27,34,43,0.96) 0%, rgba(22,29,37,0.96) 100%)"
+        metric_bdr         = "rgba(255,255,255,0.10)"
+        metric_val_col     = TEXT_COL
+        metric_lbl_col     = SUBTEXT_COL
+        dataframe_bg       = "rgba(27,34,43,0.96)"
+        dataframe_bdr      = "rgba(255,255,255,0.08)"
+        chart_card_bg      = "rgba(27,34,43,0.45)"
+        chart_card_bdr     = "rgba(255,255,255,0.06)"
+        hero_bg            = "linear-gradient(90deg, rgba(12,16,24,0.92) 0%, rgba(18,30,22,0.88) 70%, rgba(29,52,33,0.78) 100%)"
+        hero_bdr           = "rgba(255,255,255,0.12)"
+        soft_card_bg       = "rgba(27,34,43,0.7)"
+        soft_card_bdr      = "rgba(255,255,255,0.08)"
+        soft_card_p_col    = SUBTEXT_COL
+        block_col          = TEXT_COL
+
+    st.markdown(
+        f"""
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=Hind:wght@300;400;500;600;700&display=swap');
+
+        html, body, [class*="css"] {{ font-family: 'Hind', sans-serif; }}
+
+        {bg_css}
+        .block-container {{
+            max-width: 1520px;
+            padding: 1.8rem clamp(1rem, 2.2vw, 2.4rem) 2rem clamp(1rem, 2.2vw, 2.4rem);
+            color: {block_col};
+        }}
+        {text_rules}
+
+        {sidebar_bg}
+        {sidebar_text}
+        section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {{ gap: 0.6rem; }}
+        section[data-testid="stSidebar"] .stRadio > label,
+        section[data-testid="stSidebar"] .stToggle > label {{ font-weight: 700; }}
+        {sidebar_radio}
+
+        {title_card}
+        .sidebar-kicker {{
+            color: {PRIMARY_COLOUR} !important;
+            font-size: 0.78rem; font-weight: 700; letter-spacing: 0.06em;
+            text-transform: uppercase; margin: 0 0 0.25rem 0;
+        }}
+        .sidebar-title {{
+            color: {sidebar_title_col} !important;
+            font-size: 1.3rem; font-weight: 700; line-height: 1.1; margin: 0;
+        }}
+        .sidebar-subtitle {{
+            color: {sidebar_sub_col} !important;
+            font-size: 0.9rem; margin: 0.35rem 0 0 0;
+        }}
+        .sidebar-section-label {{
+            color: {sidebar_label_col} !important;
+            font-size: 0.76rem; font-weight: 700; letter-spacing: 0.07em;
+            text-transform: uppercase; margin: 0.35rem 0 0.2rem 0;
+        }}
+        .sidebar-stats-grid {{
+            display: grid; grid-template-columns: 1fr 1fr; gap: 0.55rem; margin-top: 0.2rem;
+        }}
+        .sidebar-stat {{
+            background: {sidebar_stat_bg};
+            border: 1px solid {sidebar_stat_bdr};
+            border-radius: 10px; padding: 0.58rem 0.65rem;
+        }}
+        .sidebar-stat b {{
+            display: block; color: {sidebar_stat_b_col} !important;
+            font-size: 1rem; line-height: 1.1;
+        }}
+        .sidebar-stat span {{
+            display: block; color: {sidebar_stat_s_col} !important;
+            font-size: 0.74rem; line-height: 1.15; margin-top: 0.2rem;
+        }}
+
+        div[data-baseweb="select"] > div,
+        div[data-baseweb="input"] > div {{
+            background-color: {input_bg};
+            border-color: {input_bdr};
+        }}
+        .stSelectbox > div > div, .stMultiSelect > div > div {{
+            background-color: {input_bg};
+        }}
+        .stSlider > div > div > div {{ background-color: rgba(167, 215, 48, 0.18); }}
+        .stSlider [data-testid="stTickBar"] > div {{ background-color: rgba(167, 215, 48, 0.40); }}
+
+        .stButton > button, .stDownloadButton > button {{
+            background-color: {PRIMARY_COLOUR}; color: #1d2430;
+            font-weight: 700; border: none; border-radius: 8px;
+        }}
+        .stButton > button:hover, .stDownloadButton > button:hover {{
+            background-color: {SECONDARY_COLOUR}; color: #ffffff;
+        }}
+
+        div[data-testid="stMetric"] {{
+            background: {metric_bg};
+            border: 1px solid {metric_bdr};
+            border-left: 5px solid {PRIMARY_COLOUR};
+            border-radius: 12px; padding: 0.85rem 1rem;
+            box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+        }}
+        div[data-testid="stMetric"] label {{
+            color: {metric_lbl_col} !important;
+            font-size: 0.82rem !important; letter-spacing: 0.35px; text-transform: uppercase;
+        }}
+        div[data-testid="stMetric"] [data-testid="stMetricValue"] {{
+            color: {metric_val_col} !important; font-weight: 700; line-height: 1.1;
+        }}
+        .metric-grid {{
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.85rem; margin: 0.25rem 0 0.95rem 0;
+        }}
+        .metric-tile {{
+            min-width: 0;
+            background: {metric_bg};
+            border: 1px solid {metric_bdr};
+            border-left: 5px solid {PRIMARY_COLOUR};
+            border-radius: 12px; padding: 0.85rem 1rem;
+            box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+        }}
+        .metric-label {{
+            display: block; color: {metric_lbl_col} !important;
+            font-size: 0.78rem; font-weight: 700; letter-spacing: 0.04em;
+            line-height: 1.15; text-transform: uppercase; margin-bottom: 0.35rem;
+        }}
+        .metric-value {{
+            display: block; color: {metric_val_col} !important;
+            font-size: clamp(1.22rem, 1.7vw, 1.8rem);
+            font-weight: 700; line-height: 1.08; overflow-wrap: anywhere;
+        }}
+
+        div[data-testid="stDataFrame"] {{
+            background-color: {dataframe_bg};
+            border: 1px solid {dataframe_bdr};
+            border-radius: 12px; padding: 0.2rem;
+        }}
+        .stPlotlyChart {{
+            margin-bottom: 1.1rem; clear: both; overflow: visible;
+        }}
+        .chart-card {{
+            background-color: {chart_card_bg};
+            border: 1px solid {chart_card_bdr};
+            border-radius: 12px;
+            padding: 0.55rem 1.45rem 0.25rem 0.55rem;
+            margin-bottom: 1.1rem; box-sizing: border-box;
+            clear: both; overflow: visible;
+        }}
+
+        .hero-banner {{
+            display: flex; justify-content: space-between; align-items: center; gap: 1.2rem;
+            padding: 1.1rem 1.4rem; border-radius: 14px;
+            border: 1px solid {hero_bdr};
+            background: {hero_bg};
+            margin-bottom: 1.3rem;
+        }}
+        .hero-copy {{ max-width: 72%; }}
+        .hero-title {{
+            margin: 0; color: {block_col};
+            font-size: clamp(1.8rem, 2.6vw, 2.6rem); line-height: 1.1; font-weight: 700;
+        }}
+        .hero-subtitle {{ margin: 0.4rem 0 0 0; color: {metric_lbl_col}; font-size: 1rem; }}
+        .hero-logos {{ display: flex; align-items: center; justify-content: flex-end; gap: 1rem; }}
+        .hero-logos img {{ height: 96px; width: auto; object-fit: contain; filter: drop-shadow(0 6px 14px rgba(0,0,0,0.25)); }}
+
+        .soft-card {{
+            background: {soft_card_bg};
+            border: 1px solid {soft_card_bdr};
+            border-left: 4px solid {PRIMARY_COLOUR};
+            border-radius: 12px; padding: 0.9rem 1.1rem; margin-bottom: 0.9rem;
+        }}
+        .soft-card p {{ margin: 0; color: {soft_card_p_col} !important; font-size: 0.95rem; }}
+
+        @media (max-width: 1080px) {{
+            .hero-banner {{ flex-direction: column; align-items: flex-start; }}
+            .hero-copy {{ max-width: 100%; }}
+            .hero-logos {{ justify-content: flex-start; }}
+            .hero-logos img {{ height: 74px; }}
+            .metric-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+        }}
+        @media (max-width: 760px) {{
+            .block-container {{ padding: 1rem 0.8rem 1.5rem 0.8rem; }}
+            .stPlotlyChart {{
+                border-radius: 10px;
+                padding: 0.35rem 0.5rem 0.1rem 0.35rem;
+                margin-bottom: 0.9rem;
+            }}
+            .hero-banner {{ padding: 0.95rem 1rem; border-radius: 12px; }}
+            .hero-title {{ font-size: 1.55rem; }}
+            .hero-subtitle {{ font-size: 0.92rem; }}
+            .hero-logos img {{ height: 58px; }}
+            .metric-grid {{ grid-template-columns: 1fr; gap: 0.65rem; }}
+            .metric-tile {{ padding: 0.72rem 0.8rem; border-radius: 10px; }}
+            .metric-value {{ font-size: 1.2rem; }}
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # ======================================================
@@ -620,29 +689,80 @@ def encode_logo() -> str:
 
 
 # ======================================================
-# PLOTLY DARK LAYOUT
+# PLOTLY LAYOUT — theme-aware
 # ======================================================
-def apply_dark_layout(fig, title=None, height=None, legend=True):
+def apply_chart_layout(fig, title=None, height=None, legend=True, theme=None):
+    """Apply consistent Plotly styling for the active theme.
+
+    Solid plot/paper backgrounds are intentional: transparent backgrounds look
+    great in the browser but produce charts with invisible axis labels when
+    Plotly renders them to PNG for download (white labels on white paper).
+    Solid colours fix the download while keeping the in-browser look clean.
+    """
+    if theme is None:
+        theme = st.session_state.get("theme", "dark")
+    is_light = theme == "light"
+
+    if is_light:
+        tmpl       = "plotly_white"
+        plot_bg    = LT_PANEL_BG
+        paper_bg   = LT_PANEL_BG
+        font_col   = LT_TEXT_COL
+        grid_col   = LT_GRID
+        line_col   = LT_LINE
+        hover_bg   = LT_HOVER_BG
+        hover_font = LT_TEXT_COL
+        hover_bdr  = f"rgba(73, 152, 35, 0.45)"
+        legend_bg  = "rgba(255,255,255,0.0)"
+    else:
+        tmpl       = "plotly_dark"
+        plot_bg    = PANEL_BG          # solid — fixes PNG download visibility
+        paper_bg   = PANEL_BG
+        font_col   = TEXT_COL
+        grid_col   = "rgba(255,255,255,0.08)"
+        line_col   = "rgba(255,255,255,0.18)"
+        hover_bg   = "#111821"
+        hover_font = TEXT_COL
+        hover_bdr  = "rgba(167, 215, 48, 0.35)"
+        legend_bg  = "rgba(0,0,0,0)"
+
+    axis_font = dict(color=font_col, family="Hind, sans-serif")
+
     fig.update_layout(
-        title=dict(text=title, font=dict(size=19, color=TEXT_COL, family="Hind, sans-serif")) if title else None,
-        template="plotly_dark",
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(color=TEXT_COL, family="Hind, sans-serif"),
+        title=dict(text=title, font=dict(size=19, color=font_col, family="Hind, sans-serif")) if title else None,
+        template=tmpl,
+        plot_bgcolor=plot_bg,
+        paper_bgcolor=paper_bg,
+        font=dict(color=font_col, family="Hind, sans-serif"),
         margin=dict(l=58, r=24, t=64 if title else 26, b=52),
         showlegend=legend,
-        legend=dict(bgcolor="rgba(0,0,0,0)", orientation="h", yanchor="bottom", y=1.02, x=0),
+        legend=dict(
+            bgcolor=legend_bg, orientation="h", yanchor="bottom", y=1.02, x=0,
+            font=dict(color=font_col, family="Hind, sans-serif"),
+        ),
         hoverlabel=dict(
-            bgcolor="#111821",
-            bordercolor="rgba(167, 215, 48, 0.35)",
-            font=dict(color=TEXT_COL, family="Hind, sans-serif", size=13),
+            bgcolor=hover_bg,
+            bordercolor=hover_bdr,
+            font=dict(color=hover_font, family="Hind, sans-serif", size=13),
         ),
     )
     if height:
         fig.update_layout(height=height)
-    fig.update_xaxes(gridcolor="rgba(255,255,255,0.08)", linecolor="rgba(255,255,255,0.18)", automargin=True, zeroline=False)
-    fig.update_yaxes(gridcolor="rgba(255,255,255,0.08)", linecolor="rgba(255,255,255,0.18)", automargin=True, zeroline=False)
+    # Explicitly override tick and title fonts so plotly_white template grays can't bleed through.
+    fig.update_xaxes(
+        gridcolor=grid_col, linecolor=line_col, automargin=True, zeroline=False,
+        tickfont=axis_font, title_font=axis_font,
+    )
+    fig.update_yaxes(
+        gridcolor=grid_col, linecolor=line_col, automargin=True, zeroline=False,
+        tickfont=axis_font, title_font=axis_font,
+    )
     return fig
+
+
+def apply_dark_layout(fig, title=None, height=None, legend=True):
+    """Backwards-compatible alias — reads theme from session state."""
+    return apply_chart_layout(fig, title=title, height=height, legend=legend)
 
 
 def hero(title: str, subtitle: str):
@@ -1024,7 +1144,8 @@ def build_sites_map(
                     colorbar=dict(
                         title=dict(text=colour_label or "Value", side="right"),
                         thickness=14, len=0.7, x=0.99, bgcolor="rgba(0,0,0,0)",
-                        tickfont=dict(color=TEXT_COL),
+                        tickfont=dict(color=LT_TEXT_COL if st.session_state.get("theme", "dark") == "light" else TEXT_COL),
+                        title_font=dict(color=LT_TEXT_COL if st.session_state.get("theme", "dark") == "light" else TEXT_COL),
                     ),
                 ),
                 customdata=customdata,
@@ -1264,7 +1385,9 @@ def yearly_box_chart(
             "Outliers hidden: %{customdata[4]:,}<extra></extra>"
         ),
         marker_color=colour, line=dict(color=colour),
-        fillcolor="rgba(167,215,48,0.20)", boxmean=True, boxpoints=False,
+        # Use a more opaque fill in light mode so boxes are visible on white.
+        fillcolor="rgba(167,215,48,0.55)" if st.session_state.get("theme", "dark") == "light" else "rgba(167,215,48,0.20)",
+        boxmean=True, boxpoints=False,
     ))
     fig.update_layout(xaxis_title="Year", yaxis_title=f"{unit}" if unit else "Value")
     fig.update_xaxes(type="category")
@@ -1423,7 +1546,11 @@ def site_season_heatmap(
     hidden = hidden.reindex_like(pivot).fillna(0)
     dec = smart_round(d["result"])
 
-    green_scale = [[0.0, "#0d3b2e"], [0.5, "#4fae3f"], [1.0, "#f2f77a"]]
+    _lt = st.session_state.get("theme", "dark") == "light"
+    green_scale = (
+        [[0.0, "#d4edda"], [0.5, "#4fae3f"], [1.0, "#1a5c1a"]] if _lt
+        else [[0.0, "#0d3b2e"], [0.5, "#4fae3f"], [1.0, "#f2f77a"]]
+    )
     text = pivot.round(dec).astype(str).replace("<NA>", "")
     customdata = np.dstack([counts.values, hidden.values])
     fig = go.Figure(go.Heatmap(
@@ -1431,7 +1558,11 @@ def site_season_heatmap(
         x=pivot.columns.tolist(),
         y=pivot.index.tolist(),
         colorscale=green_scale,
-        colorbar=dict(title=f"Median ({unit})" if unit else "Median"),
+        colorbar=dict(
+            title=f"Median ({unit})" if unit else "Median",
+            tickfont=dict(color=LT_TEXT_COL if st.session_state.get("theme", "dark") == "light" else TEXT_COL),
+            title_font=dict(color=LT_TEXT_COL if st.session_state.get("theme", "dark") == "light" else TEXT_COL),
+        ),
         text=text.values,
         texttemplate="%{text}",
         customdata=customdata,
@@ -1547,18 +1678,31 @@ def render_correlation_matrix(test_names: list[str], title: str, min_pairs: int,
     labels = [truncate_label(t, 30) for t in matrix.index]
     z = matrix.values
     text = np.where(np.isfinite(z), np.round(z, 2).astype(str), "")
+    is_light = st.session_state.get("theme", "dark") == "light"
+    if is_light:
+        corr_colorscale = [
+            [0.0, "#9b59b6"],   # mid-purple for -1 (readable on white)
+            [0.5, "#f0f0f0"],   # near-white midpoint
+            [1.0, PRIMARY_COLOUR],
+        ]
+    else:
+        corr_colorscale = [
+            [0.0, "#3b1f5f"],
+            [0.5, "#202833"],
+            [1.0, PRIMARY_COLOUR],
+        ]
     fig = go.Figure(go.Heatmap(
         z=z,
         x=labels,
         y=labels,
         zmin=-1,
         zmax=1,
-        colorscale=[
-            [0.0, "#3b1f5f"],
-            [0.5, "#202833"],
-            [1.0, PRIMARY_COLOUR],
-        ],
-        colorbar=dict(title="Spearman r"),
+        colorscale=corr_colorscale,
+        colorbar=dict(
+            title="Spearman r",
+            tickfont=dict(color=LT_TEXT_COL if st.session_state.get("theme", "dark") == "light" else TEXT_COL),
+            title_font=dict(color=LT_TEXT_COL if st.session_state.get("theme", "dark") == "light" else TEXT_COL),
+        ),
         text=text,
         texttemplate="%{text}",
         hovertemplate="<b>%{y}</b><br>%{x}<br>Spearman r: %{z:.2f}<extra></extra>",
@@ -1820,8 +1964,16 @@ def priority_coverage_heatmap(view: pd.DataFrame):
         z=z,
         x=[str(int(y)) for y in pivot.columns],
         y=pivot.index.tolist(),
-        colorscale=[[0, "#202833"], [0.5, "#4fae3f"], [1, "#f2f77a"]],
-        colorbar=dict(title="Reading intensity"),
+        colorscale=(
+            [[0, "#e8f5e9"], [0.5, "#4fae3f"], [1, "#1a5c1a"]]
+            if st.session_state.get("theme", "dark") == "light"
+            else [[0, "#202833"], [0.5, "#4fae3f"], [1, "#f2f77a"]]
+        ),
+        colorbar=dict(
+            title="Reading intensity",
+            tickfont=dict(color=LT_TEXT_COL if st.session_state.get("theme", "dark") == "light" else TEXT_COL),
+            title_font=dict(color=LT_TEXT_COL if st.session_state.get("theme", "dark") == "light" else TEXT_COL),
+        ),
         customdata=pivot.values,
         hovertemplate="<b>%{y}</b><br>%{x}<br>Readings: %{customdata:,}<extra></extra>",
     ))
@@ -1989,6 +2141,14 @@ with st.sidebar:
             "and hides readings below Q1 - 3×IQR or above Q3 + 3×IQR."
         ),
     )
+    st.markdown('<p class="sidebar-section-label">Theme</p>', unsafe_allow_html=True)
+    _light_mode = st.toggle(
+        "Light mode",
+        value=False,
+        key="light_mode_toggle",
+        help="Switch between the dark HydroStar theme (default) and a light version suitable for printing and presentations.",
+    )
+    st.session_state["theme"] = "light" if _light_mode else "dark"
     st.markdown('<p class="sidebar-section-label">Dataset</p>', unsafe_allow_html=True)
     st.markdown(
         '<div class="sidebar-stats-grid">'
@@ -1999,6 +2159,9 @@ with st.sidebar:
         '</div>',
         unsafe_allow_html=True,
     )
+
+# Inject CSS for the active theme (must run after the sidebar sets session_state["theme"]).
+inject_css(st.session_state.get("theme", "dark"))
 
 
 # ======================================================
