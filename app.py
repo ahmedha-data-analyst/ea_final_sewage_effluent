@@ -826,6 +826,62 @@ def human_result_value(value) -> str:
     return f"{value:.2e}"
 
 
+def get_window_totals(start_date, end_date) -> dict:
+    """Dataset-wide headline figures filtered to the selected date window.
+
+    Uses year_counts (precomputed) so we never scan the parquet for Overview metrics.
+    Site counts and test/unit counts come from the full summary since those are not
+    tracked per-year in the precomputed files.
+    """
+    summary = load_summary()
+    year_counts = load_year_counts()
+    start_year = pd.Timestamp(start_date).year
+    end_year = pd.Timestamp(end_date).year
+
+    if not year_counts.empty:
+        wc = year_counts[
+            (year_counts["SourceYear"] >= start_year) & (year_counts["SourceYear"] <= end_year)
+        ]
+        total_obs = int(wc["n_obs"].sum())
+        n_years = int(wc["SourceYear"].nunique())
+        # Tests that have any readings in this window
+        n_tests = int(wc["Test"].nunique()) if not wc.empty else 0
+    else:
+        # Fallback: estimate from summary proportional to date span
+        totals = get_dataset_totals()
+        total_obs = totals["total_obs"]
+        n_years = totals["n_years"]
+        n_tests = totals["n_tests"]
+
+    # Site count: use summary rows for tests active in window
+    if not year_counts.empty and not wc.empty:
+        active_tests = wc["Test"].unique()
+        active_summary = summary[summary["Test"].isin(active_tests)]
+        max_sites = int(active_summary["n_sites"].max()) if not active_summary.empty else 0
+    else:
+        max_sites = int(summary["n_sites"].max())
+
+    n_units = int(summary["Unit"].nunique())
+    primary = get_primary_unit_summary()
+    n_priority = int(primary[primary["Test"].isin(PRIORITY_TESTS)]["Test"].nunique())
+
+    # First/last sample within window
+    totals_full = get_dataset_totals()
+    first = max(pd.Timestamp(start_date), totals_full["first"])
+    last = min(pd.Timestamp(end_date), totals_full["last"])
+
+    return {
+        "total_obs": total_obs,
+        "n_tests": n_tests,
+        "n_units": n_units,
+        "max_sites": max_sites,
+        "first": first,
+        "last": last,
+        "n_years": n_years,
+        "n_priority_available": n_priority,
+    }
+
+
 def estimate_window_rows(summary_row: pd.Series, start_date, end_date) -> int:
     """Estimate rows for a selected date window without scanning the parquet."""
     first = pd.Timestamp(summary_row["first_sample"])
@@ -917,8 +973,13 @@ def filter_by_date_range(df: pd.DataFrame, start_date, end_date) -> pd.DataFrame
     return df.loc[(dates >= start_ts) & (dates < end_exclusive)].copy()
 
 
-def detailed_metric_items(df: pd.DataFrame, unit: str, dec: int = 3) -> list[tuple[str, str]]:
-    """Metric values for the currently selected row-level date window."""
+def detailed_metric_items(df: pd.DataFrame, unit: str, dec: int = 3, remove_outliers: bool = False) -> list[tuple[str, str]]:
+    """Metric values for the currently selected row-level date window.
+
+    When remove_outliers is True the same 3×IQR filter applied to the charts
+    is also applied here, so Readings, Median, P10–P90 and Min/Max all reflect
+    the filtered dataset — consistent with what the charts show.
+    """
     if df.empty:
         return [
             ("Readings", "0"),
@@ -931,7 +992,11 @@ def detailed_metric_items(df: pd.DataFrame, unit: str, dec: int = 3) -> list[tup
             ("Period", "No data"),
         ]
 
-    results = pd.to_numeric(df["result"], errors="coerce").dropna() if "result" in df.columns else pd.Series(dtype="float64")
+    stat_df = df
+    if remove_outliers:
+        stat_df, _ = iqr_filtered_frame(df.dropna(subset=["result"]).copy())
+
+    results = pd.to_numeric(stat_df["result"], errors="coerce").dropna() if "result" in stat_df.columns else pd.Series(dtype="float64")
     dates = pd.to_datetime(df["Date"], errors="coerce").dropna() if "Date" in df.columns else pd.Series(dtype="datetime64[ns]")
     years = dates.dt.year.nunique() if not dates.empty else df["SourceYear"].nunique() if "SourceYear" in df.columns else 0
     period = f"{dates.min().year}–{dates.max().year}" if not dates.empty else "No dates"
@@ -939,12 +1004,12 @@ def detailed_metric_items(df: pd.DataFrame, unit: str, dec: int = 3) -> list[tup
     if results.empty:
         median = p_range = min_max = "n/a"
     else:
-        median = f"{results.median():,.{dec}f}"
-        p_range = f"{results.quantile(0.10):,.{dec}f} – {results.quantile(0.90):,.{dec}f}"
-        min_max = f"{results.min():,.{dec}f} / {results.max():,.{dec}f}"
+        median = human_result_value(results.median())
+        p_range = f"{human_result_value(results.quantile(0.10))} – {human_result_value(results.quantile(0.90))}"
+        min_max = f"{human_result_value(results.min())} / {human_result_value(results.max())}"
 
     return [
-        ("Readings", human_int(len(df))),
+        ("Readings", human_int(len(stat_df))),
         ("Sampling points", human_int(df["Sampling Point"].nunique()) if "Sampling Point" in df.columns else "0"),
         ("Years covered", human_int(years)),
         ("Unit", unit),
@@ -996,18 +1061,20 @@ def site_aggregates_from_frame(df: pd.DataFrame) -> pd.DataFrame:
     required = {"Latitude", "Longitude", "Sampling Point", "result"}
     if not required.issubset(df.columns):
         return pd.DataFrame()
+    agg_spec = dict(
+        n_obs=("result", "count"),
+        median=("result", "median"),
+        mean=("result", "mean"),
+        lat=("Latitude", "median"),
+        lon=("Longitude", "median"),
+    )
+    if "Date" in df.columns:
+        agg_spec["first"] = ("Date", "min")
+        agg_spec["last"]  = ("Date", "max")
     grouped = (
         df.dropna(subset=["Latitude", "Longitude"])
         .groupby("Sampling Point")
-        .agg(
-            n_obs=("result", "count"),
-            median=("result", "median"),
-            mean=("result", "mean"),
-            lat=("Latitude", "median"),
-            lon=("Longitude", "median"),
-            first=("Date", "min"),
-            last=("Date", "max"),
-        )
+        .agg(**agg_spec)
         .reset_index()
     )
     return grouped
@@ -1592,6 +1659,228 @@ def site_season_heatmap(
     render_plotly(fig)
 
 
+def _compute_outlier_impact(df: pd.DataFrame) -> pd.DataFrame:
+    """Return a per-site DataFrame of outlier counts/percentages (no plotting)."""
+    required = {"result", "Sampling Point", "Latitude", "Longitude"}
+    if df.empty or not required.issubset(df.columns):
+        return pd.DataFrame()
+    d = df.dropna(subset=["result", "Sampling Point"]).copy()
+    d["result"] = pd.to_numeric(d["result"], errors="coerce")
+    d = d.dropna(subset=["result"])
+    if d.empty:
+        return pd.DataFrame()
+
+    rows = []
+    for site, grp in d.groupby("Sampling Point", sort=False):
+        vals = grp["result"]
+        if len(vals) < 4:
+            continue
+        q1 = vals.quantile(0.25)
+        q3 = vals.quantile(0.75)
+        iqr = q3 - q1
+        if not np.isfinite(iqr) or iqr <= 0:
+            continue
+        lower = q1 - 3.0 * iqr
+        upper = q3 + 3.0 * iqr
+        n_high = int((vals > upper).sum())
+        n_low  = int((vals < lower).sum())
+        if n_high == 0 and n_low == 0:
+            continue
+        n_total = len(vals)
+        n_kept = n_total - n_high - n_low
+        rows.append({
+            "Sampling Point": site,
+            "n_high": n_high,
+            "n_low": n_low,
+            "n_removed": n_high + n_low,
+            "n_readings": n_total,
+            "n_kept": n_kept,
+            "pct_removed": (n_high + n_low) / n_total * 100,
+            "median_all": float(vals.median()),
+            "lat": float(grp["Latitude"].median()),
+            "lon": float(grp["Longitude"].median()),
+        })
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+
+def outlier_impact_map(df: pd.DataFrame, unit: str, height: int = 560):
+    """Map of sites affected by the 3×IQR filter with two separate colour scales.
+
+    Sites dominated by HIGH outliers (spikes above Q3+3×IQR) are coloured on an
+    orange → deep-red scale. Sites dominated by LOW outliers (dips below Q1-3×IQR)
+    are coloured on a lavender → deep-violet scale. In both cases, darker = a higher
+    percentage of that site's readings were removed. Dot size encodes the raw count
+    of removed readings. Sites with both types of outlier are assigned to whichever
+    direction accounts for more removed readings.
+    """
+    impact = _compute_outlier_impact(df)
+    if impact.empty:
+        st.info("No outliers are removed from any site under the 3×IQR rule.")
+        return
+
+    impact = impact.dropna(subset=["lat", "lon"])
+    if impact.empty:
+        st.info("No geographic data available for affected sites.")
+        return
+
+    dec = smart_round(pd.to_numeric(df["result"], errors="coerce").dropna()) if "result" in df.columns else 2
+
+    # Split into dominant-high and dominant-low groups.
+    high_mask = impact["n_high"] >= impact["n_low"]
+    high_sites = impact[high_mask].copy()
+    low_sites  = impact[~high_mask].copy()
+
+    # Shared sqrt size scaling across ALL affected sites so sizes are comparable.
+    all_obs = impact["n_removed"].clip(lower=1)
+    sqrt_all = np.sqrt(all_obs)
+    s_min, s_max = 7.0, 28.0
+    if sqrt_all.max() > sqrt_all.min():
+        _norm = (sqrt_all - sqrt_all.min()) / (sqrt_all.max() - sqrt_all.min())
+    else:
+        _norm = pd.Series(0.5, index=impact.index)
+    all_sizes = s_min + _norm * (s_max - s_min)
+    high_sizes = all_sizes[high_mask].values
+    low_sizes  = all_sizes[~high_mask].values
+
+    # Shared % scale so colour intensities are comparable between the two groups.
+    all_pct = impact["pct_removed"]
+    pct_lo = float(all_pct.quantile(0.02))
+    pct_hi = float(all_pct.quantile(0.98))
+    if pct_hi <= pct_lo:
+        pct_lo, pct_hi = float(all_pct.min()), float(all_pct.max())
+
+    # Orange → deep red for high-outlier-dominant sites.
+    high_scale = [
+        [0.0,  "#fddcb5"],   # pale amber
+        [0.30, "#f4a44a"],   # orange
+        [0.60, "#d95f1a"],   # burnt orange
+        [0.82, "#a82a06"],   # deep red-orange
+        [1.0,  "#6b0c02"],   # near-black red
+    ]
+
+    # Pale lavender → deep violet for low-outlier-dominant sites.
+    low_scale = [
+        [0.0,  "#e8d8f5"],   # pale lavender
+        [0.30, "#b07edc"],   # medium purple
+        [0.60, "#7c3dbb"],   # violet
+        [0.82, "#4e1a8a"],   # deep violet
+        [1.0,  "#240952"],   # near-black purple
+    ]
+
+    is_light = st.session_state.get("theme", "dark") == "light"
+    tick_col = LT_TEXT_COL if is_light else TEXT_COL
+
+    def _make_customdata(sub):
+        return np.column_stack([
+            sub["Sampling Point"].astype(str).values,
+            sub["n_removed"].values,
+            sub["n_high"].values,
+            sub["n_low"].values,
+            sub["n_readings"].values,
+            sub["pct_removed"].round(1).values,
+            sub["median_all"].round(dec).values,
+        ])
+
+    hover_tmpl = (
+        "<b>%{customdata[0]}</b><br>"
+        "Removed: %{customdata[1]:,} (%{customdata[5]:.1f}% of readings)<br>"
+        "↑ High outliers: %{customdata[2]:,} &nbsp; ↓ Low outliers: %{customdata[3]:,}<br>"
+        f"Total readings: %{{customdata[4]:,}}<br>"
+        f"Site median: %{{customdata[6]}} {unit}<extra></extra>"
+    )
+
+    fig = go.Figure()
+
+    # Shared colorbar config — stacked vertically on the right with clear labels.
+    _cb_high = dict(
+        title=dict(text="↑ Spikes", font=dict(color=tick_col, size=12), side="top"),
+        thickness=16,
+        len=0.40,
+        x=0.99,
+        xanchor="right",
+        y=0.78,
+        yanchor="middle",
+        bgcolor="rgba(0,0,0,0)",
+        outlinewidth=0,
+        ticksuffix="%",
+        tickfont=dict(color=tick_col, size=11),
+        nticks=5,
+    )
+    _cb_low = dict(
+        title=dict(text="↓ Dips", font=dict(color=tick_col, size=12), side="top"),
+        thickness=16,
+        len=0.40,
+        x=0.99,
+        xanchor="right",
+        y=0.28,
+        yanchor="middle",
+        bgcolor="rgba(0,0,0,0)",
+        outlinewidth=0,
+        ticksuffix="%",
+        tickfont=dict(color=tick_col, size=11),
+        nticks=5,
+    )
+
+    if not high_sites.empty:
+        fig.add_trace(
+            _MAP_TRACE(
+                lat=high_sites["lat"],
+                lon=high_sites["lon"],
+                mode="markers",
+                name="High-outlier sites",
+                marker=dict(
+                    size=high_sizes,
+                    color=high_sites["pct_removed"],
+                    colorscale=high_scale,
+                    cmin=pct_lo,
+                    cmax=pct_hi,
+                    opacity=0.88,
+                    colorbar=_cb_high,
+                ),
+                customdata=_make_customdata(high_sites),
+                hovertemplate=hover_tmpl,
+                showlegend=False,
+            )
+        )
+
+    if not low_sites.empty:
+        fig.add_trace(
+            _MAP_TRACE(
+                lat=low_sites["lat"],
+                lon=low_sites["lon"],
+                mode="markers",
+                name="Low-outlier sites",
+                marker=dict(
+                    size=low_sizes,
+                    color=low_sites["pct_removed"],
+                    colorscale=low_scale,
+                    cmin=pct_lo,
+                    cmax=pct_hi,
+                    opacity=0.88,
+                    colorbar=_cb_low,
+                ),
+                customdata=_make_customdata(low_sites),
+                hovertemplate=hover_tmpl,
+                showlegend=False,
+            )
+        )
+
+    center_lat = float(impact["lat"].median())
+    center_lon = float(impact["lon"].median())
+    _set_map_layout(
+        fig,
+        style="carto-darkmatter",
+        center_lat=center_lat,
+        center_lon=center_lon,
+        zoom=5.0,
+        margin=dict(l=0, r=0, t=0, b=0),
+        height=height,
+        paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(color=TEXT_COL),
+    )
+    render_map_plotly(fig)
+
+
 def zero_share_chart(summary_row: pd.Series, title: str):
     """Simple zero vs non-zero split from the summary table."""
     zero_pct = float(summary_row.get("frac_zero", 0) or 0) * 100
@@ -1928,13 +2217,17 @@ def overview_data_quality_bars(primary: pd.DataFrame):
         render_plotly(fig)
 
 
-def overview_yearly_readings_chart():
+def overview_yearly_readings_chart(start_date=None, end_date=None):
     """Horizontal bar chart of total readings per year across all tests (from precomputed file)."""
     year_counts = load_year_counts()
     if year_counts.empty:
         return
     by_year = year_counts.groupby("SourceYear")["n_obs"].sum().reset_index(name="n_obs")
     by_year = by_year.sort_values("SourceYear", ascending=True)
+    if start_date is not None and end_date is not None:
+        start_year = pd.Timestamp(start_date).year
+        end_year = pd.Timestamp(end_date).year
+        by_year = by_year[(by_year["SourceYear"] >= start_year) & (by_year["SourceYear"] <= end_year)]
     fig = go.Figure(go.Bar(
         y=by_year["SourceYear"].astype(str),
         x=by_year["n_obs"],
@@ -2124,13 +2417,15 @@ with st.sidebar:
         _w_end -= 5
     _window_options.append(f"All years ({global_min_year}–{global_max_year})")
 
+    # Default to the most-recent 5-year window (first item, e.g. 2021–2025)
+    _default_window_index = 0
     selected_window = st.selectbox(
-        "5-year window",
+        "Date window",
         options=_window_options,
-        index=0,
+        index=_default_window_index,
         help=(
-            "Charts and maps show only this period. "
-            "Overview summary stats and rankings always cover the full dataset."
+            "All stats, charts and maps update to show only this period. "
+            "Choose a 5-year window to zoom in, or keep 'All years' for the full record."
         ),
         label_visibility="visible",
     )
@@ -2149,12 +2444,23 @@ with st.sidebar:
     st.markdown('<p class="sidebar-section-label">Display</p>', unsafe_allow_html=True)
     remove_outliers = st.toggle(
         "Remove outliers (3×IQR)",
-        value=False,
+        value=True,
         help=(
             "For each series, the app finds the middle 50% of values (the IQR) "
             "and hides readings below Q1 - 3×IQR or above Q3 + 3×IQR."
         ),
     )
+    if remove_outliers:
+        _hidden = st.session_state.get("_outlier_hidden_total")
+        _hidden_sites = st.session_state.get("_outlier_hidden_sites")
+        if _hidden is not None and _hidden > 0:
+            st.markdown(
+                f'<div class="sidebar-stat" style="margin-top:0.3rem;margin-bottom:0.75rem">'
+                f'<b style="color:{WARN_AMBER} !important">{human_int(_hidden)}</b>'
+                f'<span>readings filtered out across {human_int(_hidden_sites)} sites</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
     st.markdown('<p class="sidebar-section-label">Theme</p>', unsafe_allow_html=True)
     # Initial value comes from ?theme query param, which is set once on first load
     # by the JS snippet below reading the OS prefers-color-scheme. After that the
@@ -2170,12 +2476,13 @@ with st.sidebar:
     st.session_state["theme"] = "light" if _light_mode else "dark"
     st.query_params["theme"] = "light" if _light_mode else "dark"
     st.markdown('<p class="sidebar-section-label">Dataset</p>', unsafe_allow_html=True)
+    _sidebar_w = get_window_totals(date_range_start, date_range_end)
     st.markdown(
         '<div class="sidebar-stats-grid">'
-        f'<div class="sidebar-stat"><b>{human_int(totals["total_obs"])}</b><span>Readings</span></div>'
-        f'<div class="sidebar-stat"><b>{human_int(totals["n_tests"])}</b><span>Tests</span></div>'
-        f'<div class="sidebar-stat"><b>{human_int(totals["max_sites"])}</b><span>Max sites</span></div>'
-        f'<div class="sidebar-stat"><b>{totals["first"].year}–{totals["last"].year}</b><span>Period</span></div>'
+        f'<div class="sidebar-stat"><b>{human_int(_sidebar_w["total_obs"])}</b><span>Readings</span></div>'
+        f'<div class="sidebar-stat"><b>{human_int(_sidebar_w["n_tests"])}</b><span>Tests</span></div>'
+        f'<div class="sidebar-stat"><b>{human_int(_sidebar_w["max_sites"])}</b><span>Max sites</span></div>'
+        f'<div class="sidebar-stat"><b>{_sidebar_w["first"].year}–{_sidebar_w["last"].year}</b><span>Period</span></div>'
         '</div>',
         unsafe_allow_html=True,
     )
@@ -2213,21 +2520,21 @@ if not st.query_params.get("theme"):
 # PAGE 1 — OVERVIEW
 # ======================================================
 def page_overview():
-    totals = get_dataset_totals()
+    totals = get_window_totals(date_range_start, date_range_end)
     hero(
         "Final Sewage Effluent — Dataset Overview",
-        "The scale and shape of England &amp; Wales treated-effluent monitoring, 2000–2025",
+        "The scale and shape of England treated-effluent monitoring, 2000–2025",
     )
 
     info_card(
         "This dataset records the quality of <b>treated wastewater leaving sewage works</b> "
-        "(\u201cFinal Sewage Effluent\u201d) across England &amp; Wales. It is large, so this page "
+        "(\u201cFinal Sewage Effluent\u201d) across England. It is large, so this page "
         "gives you the big picture first: how many readings, how many tests, how many sites, "
         "over what period and where. Use the <b>Explore a test</b> page to dive into any single "
         "determinand."
     )
 
-    # --- Headline metrics ---
+    # --- Headline metrics (window-scoped) ---
     metric_grid([
         ("Total readings", human_int(totals["total_obs"])),
         ("Distinct tests", human_int(totals["n_tests"])),
@@ -2246,7 +2553,7 @@ def page_overview():
         "How much monitoring happened each year across all tests. "
         "Gaps or dips can indicate changes in reporting rather than changes in water quality."
     )
-    overview_yearly_readings_chart()
+    overview_yearly_readings_chart(date_range_start, date_range_end)
 
     st.markdown("---")
 
@@ -2410,21 +2717,6 @@ def render_test_explorer(test_name: str, scope_label: str):
     if notes:
         st.caption("Data note: " + "; ".join(notes) + ".")
 
-    # All-time summary metrics — always shown, from precomputed summary, no parquet needed.
-    summary_metric_values = [
-        ("Readings (all-time)", human_int(srow["n_obs"])),
-        ("Sampling points", human_int(srow["n_sites"])),
-        ("Years covered", human_int(srow["n_years"])),
-        ("Unit", unit),
-        ("Median (all-time)", human_result_value(srow["median"])),
-        ("​P10–P90", f"{human_result_value(srow['p10'])} – {human_result_value(srow['p90'])}"),
-        ("Min / Max", f"{human_result_value(srow['min'])} / {human_result_value(srow['max'])}"),
-        ("Period", f"{srow['first_sample'].year}–{srow['last_sample'].year}"),
-    ]
-    metric_grid(summary_metric_values)
-
-    st.markdown("---")
-
     # Safety check: warn if the selected window would load too many rows.
     estimated_rows = estimate_window_rows(srow, date_range_start, date_range_end)
     if estimated_rows > DETAIL_ROW_LIMIT:
@@ -2450,8 +2742,38 @@ def render_test_explorer(test_name: str, scope_label: str):
         return
 
     dec = smart_round(df["result"]) if "result" in df.columns else 3
+
+    # Compute outlier counts eagerly so the sidebar badge reflects the current
+    # toggle state on this very run (sidebar renders before the page body).
+    _d_iq = df.dropna(subset=["result", "Sampling Point"]).copy() if "Sampling Point" in df.columns else pd.DataFrame()
+    if not _d_iq.empty:
+        _d_iq["result"] = pd.to_numeric(_d_iq["result"], errors="coerce")
+        _d_iq = _d_iq.dropna(subset=["result"])
+    _hidden_total = 0
+    _hidden_site_count = 0
+    if not _d_iq.empty:
+        for _, _grp in _d_iq.groupby("Sampling Point", sort=False):
+            _vals = _grp["result"]
+            if len(_vals) < 4:
+                continue
+            _q1, _q3 = _vals.quantile(0.25), _vals.quantile(0.75)
+            _iqr = _q3 - _q1
+            if not np.isfinite(_iqr) or _iqr <= 0:
+                continue
+            _n_out = int((_vals > _q3 + 3 * _iqr).sum()) + int((_vals < _q1 - 3 * _iqr).sum())
+            if _n_out > 0:
+                _hidden_total += _n_out
+                _hidden_site_count += 1
+    st.session_state["_outlier_hidden_total"] = _hidden_total
+    st.session_state["_outlier_hidden_sites"] = _hidden_site_count
+
+    # Window-scoped summary metrics — computed from the loaded data.
+    metric_grid(detailed_metric_items(df, unit, dec, remove_outliers=remove_outliers))
+
+    st.markdown("---")
+
     st.caption(
-        f"Detailed charts below cover: {date_range_start:%d %b %Y} → {date_range_end:%d %b %Y} "
+        f"All charts below cover: {date_range_start:%d %b %Y} → {date_range_end:%d %b %Y} "
         f"({human_int(len(df))} readings loaded)."
     )
 
@@ -2490,6 +2812,18 @@ def render_test_explorer(test_name: str, scope_label: str):
         map_sites, title="", colour_metric="median",
         colour_label=f"Median ({unit})" if unit else "Median", unit=unit, height=560,
     )
+
+    st.markdown("---")
+
+    # ── 3b. Outlier impact by site ─────────────────────────────────────────────────────────────────────────────────────
+    st.markdown("### Outlier impact by site")
+    st.caption(
+        "Each dot is a site where the 3×IQR filter removes at least one reading. "
+        "Orange → deep red = site dominated by high outliers (extreme spikes). "
+        "Lavender → deep violet = site dominated by low outliers (extreme dips). "
+        "Darker colour = higher percentage of readings removed. Dot size = raw count removed."
+    )
+    outlier_impact_map(df, unit, height=560)
 
     st.markdown("---")
 
@@ -2618,9 +2952,23 @@ def page_priority():
     pr = priority_summary_table()
     avail = pr["Test"].nunique()
 
+    # Window-scoped readings from year_counts
+    _yc = load_year_counts()
+    _start_yr = pd.Timestamp(date_range_start).year
+    _end_yr = pd.Timestamp(date_range_end).year
+    if not _yc.empty:
+        _pr_yc = _yc[
+            _yc["Test"].isin(pr["Test"])
+            & (_yc["SourceYear"] >= _start_yr)
+            & (_yc["SourceYear"] <= _end_yr)
+        ]
+        _window_readings = int(_pr_yc["n_obs"].sum())
+    else:
+        _window_readings = int(pr["n_obs"].sum())
+
     metric_grid([
         ("Priority tests", f"{avail} / 61"),
-        ("Total priority readings", human_int(pr["n_obs"].sum())),
+        ("Total priority readings", human_int(_window_readings)),
         ("Widest coverage", human_int(pr["n_sites"].max())),
         ("Median sites per test", human_int(pr["n_sites"].median())),
     ])
@@ -2725,5 +3073,5 @@ if page == "Overview":
     page_overview()
 elif page == "Explore a test":
     page_explore_test()
-else:
+elif page == "Priority tests":
     page_priority()
