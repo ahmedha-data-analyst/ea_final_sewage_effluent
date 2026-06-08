@@ -33,6 +33,7 @@ Files expected alongside this app.py:
 """
 
 import base64
+import datetime as _dt
 import html
 import math
 from pathlib import Path
@@ -52,7 +53,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-st.set_option("client.toolbarMode", "viewer")
 
 
 # ======================================================
@@ -385,7 +385,6 @@ def inject_css(theme: str = "dark"):
         }}
         /* Dropdown selected value and option text */
         div[data-baseweb="select"] span,
-        div[data-baseweb="select"] div,
         div[data-baseweb="input"] input {{
             color: {block_col} !important;
         }}
@@ -2136,12 +2135,12 @@ with st.sidebar:
         label_visibility="visible",
     )
     if selected_window.startswith("All"):
-        import datetime as _dt
+        pass  # _dt imported at top
         date_range_start = totals["first"].date()
         date_range_end = totals["last"].date()
     else:
         _yr_parts = selected_window.split("–")
-        import datetime as _dt
+        pass  # _dt imported at top
         date_range_start = _dt.date(int(_yr_parts[0]), 1, 1)
         date_range_end = _dt.date(int(_yr_parts[1]), 12, 31)
     st.caption(
@@ -2159,7 +2158,7 @@ with st.sidebar:
     st.markdown('<p class="sidebar-section-label">Theme</p>', unsafe_allow_html=True)
     # Initial value comes from ?theme query param, which is set once on first load
     # by the JS snippet below reading the OS prefers-color-scheme. After that the
-    # toggle is the single source of truth — the native Streamlit picker is hidden.
+    # toggle is the single source of truth for our custom HydroStar CSS.
     _qp_theme = st.query_params.get("theme", "dark")
     _initial_light = (_qp_theme == "light")
     _light_mode = st.toggle(
