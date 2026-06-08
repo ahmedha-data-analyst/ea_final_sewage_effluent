@@ -1767,8 +1767,9 @@ def outlier_impact_map(df: pd.DataFrame, unit: str, height: int = 560):
         [1.0,  "#240952"],   # near-black purple
     ]
 
-    is_light = st.session_state.get("theme", "dark") == "light"
-    tick_col = LT_TEXT_COL if is_light else TEXT_COL
+    # The outlier map always uses carto-darkmatter, so colorbar labels must
+    # always be white regardless of the app theme.
+    tick_col = "#ffffff"
 
     def _make_customdata(sub):
         return np.column_stack([
