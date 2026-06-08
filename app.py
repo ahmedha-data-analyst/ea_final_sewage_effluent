@@ -380,12 +380,27 @@ def inject_css(theme: str = "dark"):
 
         div[data-baseweb="select"] > div,
         div[data-baseweb="input"] > div {{
-            background-color: {input_bg};
-            border-color: {input_bdr};
+            background-color: {input_bg} !important;
+            border-color: {input_bdr} !important;
+        }}
+        /* Dropdown selected value and option text */
+        div[data-baseweb="select"] span,
+        div[data-baseweb="select"] div,
+        div[data-baseweb="input"] input {{
+            color: {block_col} !important;
+        }}
+        /* Dropdown option list */
+        ul[data-testid="stSelectboxVirtualDropdown"] li,
+        ul[data-testid="stSelectboxVirtualDropdown"] span {{
+            color: {block_col} !important;
+            background-color: {input_bg} !important;
         }}
         .stSelectbox > div > div, .stMultiSelect > div > div {{
-            background-color: {input_bg};
+            background-color: {input_bg} !important;
+            color: {block_col} !important;
         }}
+        /* Number input text */
+        input[type="number"] {{ color: {block_col} !important; background-color: {input_bg} !important; }}
         .stSlider > div > div > div {{ background-color: rgba(167, 215, 48, 0.18); }}
         .stSlider [data-testid="stTickBar"] > div {{ background-color: rgba(167, 215, 48, 0.40); }}
 
@@ -2142,18 +2157,18 @@ with st.sidebar:
         ),
     )
     st.markdown('<p class="sidebar-section-label">Theme</p>', unsafe_allow_html=True)
-    # Determine the initial toggle value from the query param (set by the JS system-detection
-    # component below on first load, or synced by the toggle on subsequent interactions).
-    _qp_theme = st.query_params.get("theme", "")
-    _initial_light = _qp_theme == "light"
+    # Initial value comes from ?theme query param, which is set once on first load
+    # by the JS snippet below reading the OS prefers-color-scheme. After that the
+    # toggle is the single source of truth — the native Streamlit picker is hidden.
+    _qp_theme = st.query_params.get("theme", "dark")
+    _initial_light = (_qp_theme == "light")
     _light_mode = st.toggle(
         "Light mode",
         value=_initial_light,
         key="light_mode_toggle",
-        help="Switch between the dark HydroStar theme and a light version. Defaults to your system colour scheme.",
+        help="Switch between dark and light HydroStar theme. On first visit this matches your system setting.",
     )
     st.session_state["theme"] = "light" if _light_mode else "dark"
-    # Keep the query param in sync with the toggle so the URL always reflects the active theme.
     st.query_params["theme"] = "light" if _light_mode else "dark"
     st.markdown('<p class="sidebar-section-label">Dataset</p>', unsafe_allow_html=True)
     st.markdown(
@@ -2169,12 +2184,12 @@ with st.sidebar:
 # Inject CSS for the active theme (must run after the sidebar sets session_state["theme"]).
 inject_css(st.session_state.get("theme", "dark"))
 
-# ── System colour-scheme detection ──────────────────────────────────────────
-# On the very first load (no ?theme param yet) a tiny JS snippet reads the
-# browser's prefers-color-scheme media query and appends ?theme=dark|light to
-# the URL, which causes Streamlit to rerun with the param set. From that point
-# the sidebar toggle reads the param for its initial value, so the app matches
-# the user's OS theme automatically without any manual interaction.
+
+# ── First-load OS theme detection ────────────────────────────────────────────
+# On the very first visit (?theme absent) this JS reads prefers-color-scheme
+# and redirects with ?theme=dark|light, so the sidebar toggle initialises to
+# match the user's system setting. Once ?theme is in the URL (set by toggle or
+# this script) the JS does nothing — the toggle owns the state from that point.
 if not st.query_params.get("theme"):
     st.components.v1.html(
         """
