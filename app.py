@@ -183,6 +183,52 @@ PRIORITY_GROUPS = {
 
 
 # ======================================================
+# REGIONS OF ENGLAND
+# ------------------------------------------------------
+# A simple, fast approximation of the EA's 6 informal regions using
+# latitude/longitude bounding boxes, checked in priority order. London and
+# East Anglia are "enclaves" carved out first, South-West is a south-western
+# box, and the remaining South/Midlands/North split is by latitude band.
+# Good enough to filter the map and charts without needing shapefiles.
+# ======================================================
+REGION_ALL = "All England"
+REGION_ORDER = [
+    REGION_ALL, "The North", "The Midlands", "East Anglia",
+    "London", "The South", "South-West",
+]
+
+# Each rule: (region_name, lat_min, lat_max, lon_min, lon_max). Checked in
+# order; the first box a point falls inside wins. The final entry is a
+# catch-all so every point is classified.
+_REGION_RULES = [
+    ("London",       51.28, 51.70, -0.51, 0.33),
+    ("East Anglia",  51.65, 90.0,   0.05, 180.0),
+    ("South-West",  -90.0, 51.70, -180.0, -2.55),
+    ("The South",   -90.0, 52.05, -180.0, 180.0),
+    ("The Midlands", -90.0, 53.40, -180.0, 180.0),
+]
+_REGION_FALLBACK = "The North"
+
+
+def assign_region(df: pd.DataFrame) -> pd.Series:
+    """Classify each row's Latitude/Longitude into one of the 6 regions."""
+    lat = pd.to_numeric(df["Latitude"], errors="coerce")
+    lon = pd.to_numeric(df["Longitude"], errors="coerce")
+    region = pd.Series(_REGION_FALLBACK, index=df.index, dtype="object")
+    assigned = pd.Series(False, index=df.index)
+    for name, lat_min, lat_max, lon_min, lon_max in _REGION_RULES:
+        in_box = (
+            (lat >= lat_min) & (lat <= lat_max)
+            & (lon >= lon_min) & (lon <= lon_max)
+            & ~assigned
+        )
+        region.loc[in_box] = name
+        assigned |= in_box
+    region.loc[lat.isna() | lon.isna()] = pd.NA
+    return region
+
+
+# ======================================================
 # GLOBAL CSS — injected per-run based on active theme
 # ======================================================
 def inject_css(theme: str = "dark"):
@@ -2442,6 +2488,17 @@ with st.sidebar:
     st.caption(
         f"Showing: {date_range_start.strftime('%d %b %Y')} → {date_range_end.strftime('%d %b %Y')}"
     )
+    st.markdown('<p class="sidebar-section-label">Region</p>', unsafe_allow_html=True)
+    selected_region = st.selectbox(
+        "Region of England",
+        options=REGION_ORDER,
+        index=0,
+        help=(
+            "Restricts 'Explore a test' and the Priority deep-dive to sampling points "
+            "in this region, based on each site's coordinates."
+            
+        ),
+    )
     st.markdown('<p class="sidebar-section-label">Display</p>', unsafe_allow_html=True)
     remove_outliers = st.toggle(
         "Remove outliers (3×IQR)",
@@ -2736,10 +2793,18 @@ def render_test_explorer(test_name: str, scope_label: str):
             date_range_start,
             date_range_end,
         )
+        if selected_region != REGION_ALL and not df.empty:
+            df = df[assign_region(df) == selected_region].reset_index(drop=True)
         sites = site_aggregates_from_frame(df)
 
     if df.empty:
-        st.info("No readings are available for this test in the selected date window.")
+        if selected_region != REGION_ALL:
+            st.info(
+                f"No readings are available for this test in {selected_region} "
+                "for the selected date window."
+            )
+        else:
+            st.info("No readings are available for this test in the selected date window.")
         return
 
     dec = smart_round(df["result"]) if "result" in df.columns else 3
@@ -2773,9 +2838,10 @@ def render_test_explorer(test_name: str, scope_label: str):
 
     st.markdown("---")
 
+    _region_note = f" in {selected_region}" if selected_region != REGION_ALL else ""
     st.caption(
-        f"All charts below cover: {date_range_start:%d %b %Y} → {date_range_end:%d %b %Y} "
-        f"({human_int(len(df))} readings loaded)."
+        f"All charts below cover: {date_range_start:%d %b %Y} → {date_range_end:%d %b %Y}"
+        f"{_region_note} ({human_int(len(df))} readings loaded)."
     )
 
     # ── 1. Readings per year ──────────────────────────────────────────────────────────────────────────────────────
