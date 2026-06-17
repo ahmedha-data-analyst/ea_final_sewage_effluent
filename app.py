@@ -2443,6 +2443,20 @@ with st.sidebar:
         """,
         unsafe_allow_html=True,
     )
+    st.markdown('<p class="sidebar-section-label">Theme</p>', unsafe_allow_html=True)
+    # Initial value comes from ?theme query param, which is set once on first load
+    # by the JS snippet below reading the OS prefers-color-scheme. After that the
+    # toggle is the single source of truth for our custom HydroStar CSS.
+    _qp_theme = st.query_params.get("theme", "dark")
+    _initial_light = (_qp_theme == "light")
+    _light_mode = st.toggle(
+        "Light mode",
+        value=_initial_light,
+        key="light_mode_toggle",
+        help="Switch between dark and light HydroStar theme. On first visit this matches your system setting.",
+    )
+    st.session_state["theme"] = "light" if _light_mode else "dark"
+    st.query_params["theme"] = "light" if _light_mode else "dark"
     st.markdown('<p class="sidebar-section-label">Navigation</p>', unsafe_allow_html=True)
     page = st.radio(
         "Page",
@@ -2496,7 +2510,7 @@ with st.sidebar:
         help=(
             "Restricts 'Explore a test' and the Priority deep-dive to sampling points "
             "in this region, based on each site's coordinates."
-            
+
         ),
     )
     st.markdown('<p class="sidebar-section-label">Display</p>', unsafe_allow_html=True)
@@ -2519,20 +2533,6 @@ with st.sidebar:
                 f'</div>',
                 unsafe_allow_html=True,
             )
-    st.markdown('<p class="sidebar-section-label">Theme</p>', unsafe_allow_html=True)
-    # Initial value comes from ?theme query param, which is set once on first load
-    # by the JS snippet below reading the OS prefers-color-scheme. After that the
-    # toggle is the single source of truth for our custom HydroStar CSS.
-    _qp_theme = st.query_params.get("theme", "dark")
-    _initial_light = (_qp_theme == "light")
-    _light_mode = st.toggle(
-        "Light mode",
-        value=_initial_light,
-        key="light_mode_toggle",
-        help="Switch between dark and light HydroStar theme. On first visit this matches your system setting.",
-    )
-    st.session_state["theme"] = "light" if _light_mode else "dark"
-    st.query_params["theme"] = "light" if _light_mode else "dark"
     st.markdown('<p class="sidebar-section-label">Dataset</p>', unsafe_allow_html=True)
     _sidebar_w = get_window_totals(date_range_start, date_range_end)
     st.markdown(
